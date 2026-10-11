@@ -2,7 +2,7 @@ import re
 from pathlib import Path
 from typing import override
 
-from accra_language import AccraError, Config, DependencySpec, Manifest, ManifestSpec
+from accra_language import AccraError, Config, Dependency, Manifest, ManifestSpec
 
 from . import utils
 
@@ -18,8 +18,8 @@ class Setup_py(Manifest):
         return Path.exists(setuppy_path)
 
     @override
-    def extract_dependencies(self) -> set[DependencySpec] | None:
-        dependencies: set[DependencySpec] = set()
+    def extract_dependencies(self) -> set[Dependency] | None:
+        dependencies: set[Dependency] = set()
         setuppy_path: Path = self.spec.config.cwd / Path(self.spec.name)
 
         try:
@@ -43,9 +43,7 @@ class Setup_py(Manifest):
                                 pkg = re.split(r"[<>=~!]", dep)[0].strip()
                                 if pkg:
                                     # TODO extract dependency version!
-                                    dependencies.add(
-                                        DependencySpec(name=pkg, version="")
-                                    )
+                                    dependencies.add(Dependency(name=pkg, version=""))
 
                             # If there is only one line
                             if "]" in line:
@@ -61,7 +59,7 @@ class Setup_py(Manifest):
                             pkg = re.split(r"[<>=~!]", dep)[0].strip()
                             if pkg:
                                 # TODO extract dependency version!
-                                dependencies.add(DependencySpec(name=pkg, version=""))
+                                dependencies.add(Dependency(name=pkg, version=""))
 
         except Exception:  # noqa: BLE001
             return None

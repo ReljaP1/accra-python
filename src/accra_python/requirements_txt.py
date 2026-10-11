@@ -3,7 +3,7 @@ import re
 from pathlib import Path
 from typing import override
 
-from accra_language import AccraError, Config, DependencySpec, Manifest, ManifestSpec
+from accra_language import AccraError, Config, Dependency, Manifest, ManifestSpec
 
 from . import utils
 
@@ -20,11 +20,11 @@ class Requirements_txt(Manifest):
 
     def _parse_requirements(
         req_file_path: Path, visited_files: set[Path]
-    ) -> set[DependencySpec]:
+    ) -> set[Dependency]:
         """
         Parses requirements recursively.
         """
-        dependencies: set[DependencySpec] = set()
+        dependencies: set[Dependency] = set()
 
         if not Path.exists(req_file_path) or req_file_path in visited_files:
             return
@@ -65,15 +65,15 @@ class Requirements_txt(Manifest):
                 # TODO take into account version specifiers
                 base_pkg = re.split(r"[<>=~!]", line)[0].strip()
                 if base_pkg:
-                    dependencies.add(DependencySpec(name=base_pkg, version=""))
+                    dependencies.add(Dependency(name=base_pkg, version=""))
 
         return dependencies
 
     @override
-    def extract_dependencies(self) -> set[DependencySpec] | None:
+    def extract_dependencies(self) -> set[Dependency] | None:
         req_file_path: Path = self.spec.config.cwd / Path(self.spec.name)
         visited_files: set[Path] = set()
-        dependencies: set[DependencySpec] = Requirements_txt._parse_requirements(
+        dependencies: set[Dependency] = Requirements_txt._parse_requirements(
             req_file_path, visited_files
         )
 

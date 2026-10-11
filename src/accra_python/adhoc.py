@@ -7,7 +7,7 @@ from importlib.metadata import packages_distributions
 from pathlib import Path
 from typing import override
 
-from accra_language import AccraError, Config, DependencySpec, Manifest, ManifestSpec
+from accra_language import AccraError, Config, Dependency, Manifest, ManifestSpec
 
 from . import utils
 
@@ -110,8 +110,8 @@ class Adhoc(Manifest):
         return packages
 
     @override
-    def extract_dependencies(self) -> set[DependencySpec] | None:
-        dependencies: set[DependencySpec] = set()
+    def extract_dependencies(self) -> set[Dependency] | None:
+        dependencies: set[Dependency] = set()
 
         for root, dirs, files in os.walk(self.spec.config.cwd):
             dirs[:] = [d for d in dirs if d.lower() not in _EXCLUDED_SUBDIRS]
@@ -129,7 +129,7 @@ class Adhoc(Manifest):
                             )
 
                             dependencies.update(
-                                {DependencySpec(name=pkg, version="") for pkg in pkgs}
+                                {Dependency(name=pkg, version="") for pkg in pkgs}
                             )
 
                     except Exception:  # noqa: BLE001, S110

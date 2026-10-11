@@ -1,21 +1,22 @@
 import shutil
 from pathlib import Path
 
-import pytest
-from accra_language import AccraError, AccraResult, Config, DockerfileInstruction
+from accra_language import AccraResult, Config
 
 from accra_python import Python3
 
 
 def test_uv():
-    correct_dockerfile: list[DockerfileInstruction] = [
-        "FROM python:3.14",
-        "RUN curl -LsSf https://astral.sh/uv/install.sh | sh",
-        "RUN uv sync",
-        "RUN uv add httpx",
-        "RUN uv add pydantic",
-        "RUN uv add rich",
-    ]
+    correct = AccraResult(
+        dockerfile=[
+            "FROM python:3.14",
+            "RUN curl -LsSf https://astral.sh/uv/install.sh | sh",
+            "RUN uv sync",
+            "RUN uv add httpx",
+            "RUN uv add pydantic",
+            "RUN uv add rich",
+        ]
+    )
 
     uv_sample_project_dir = Path(__file__).resolve().parent / Path(
         "fixtures/uv-sample-project"
@@ -32,14 +33,9 @@ def test_uv():
         assert python3.detect()
 
         result: AccraResult = python3.build()
-        assert result
+        assert result.success
 
-        match result:
-            case list():
-                assert result == correct_dockerfile
-
-            case AccraError():
-                pytest.fail(result.message)
+        assert result == correct
 
     finally:
         shutil.rmtree(tmp_dir)

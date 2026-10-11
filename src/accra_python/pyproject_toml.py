@@ -3,7 +3,7 @@ import tomllib
 from pathlib import Path
 from typing import Any, override
 
-from accra_language import AccraError, Config, DependencySpec, Manifest, ManifestSpec
+from accra_language import AccraError, Config, Dependency, Manifest, ManifestSpec
 
 from . import utils
 
@@ -41,8 +41,8 @@ class Pyproject_toml(Manifest):
 
         return True
 
-    def _extract_PEP_621_dependencies(self) -> set[DependencySpec] | None:
-        result: set[DependencySpec] = set()
+    def _extract_PEP_621_dependencies(self) -> set[Dependency] | None:
+        result: set[Dependency] = set()
 
         if not self.project_section:
             return None
@@ -59,12 +59,12 @@ class Pyproject_toml(Manifest):
             pkg_ver = pkg[1].strip() if len(pkg) > 2 else ""
 
             if pkg_name:
-                result.add(DependencySpec(name=pkg_name, version=pkg_ver))
+                result.add(Dependency(name=pkg_name, version=pkg_ver))
 
         return result
 
-    def _extract_poetry_dependencies(self) -> set[DependencySpec] | None:
-        result: set[DependencySpec] = set()
+    def _extract_poetry_dependencies(self) -> set[Dependency] | None:
+        result: set[Dependency] = set()
 
         if not self.poetry_section:
             return None
@@ -84,13 +84,13 @@ class Pyproject_toml(Manifest):
             pkg_ver = pkg[1].strip() if len(pkg) > 2 else ""
 
             if pkg_name:
-                result.add(DependencySpec(name=pkg_name, version=pkg_ver))
+                result.add(Dependency(name=pkg_name, version=pkg_ver))
 
         return result
 
     @override
-    def extract_dependencies(self) -> set[DependencySpec] | None:
-        dependencies: set[DependencySpec] = set()
+    def extract_dependencies(self) -> set[Dependency] | None:
+        dependencies: set[Dependency] = set()
 
         pep_621_deps = self._extract_PEP_621_dependencies()
         if pep_621_deps:

@@ -3,7 +3,7 @@ import re
 from pathlib import Path
 from typing import override
 
-from accra_language import AccraError, Config, DependencySpec, Manifest, ManifestSpec
+from accra_language import AccraError, Config, Dependency, Manifest, ManifestSpec
 
 from . import utils
 
@@ -43,8 +43,8 @@ class Setup_cfg(Manifest):
             return False
 
     @override
-    def extract_dependencies(self) -> set[DependencySpec] | None:
-        dependencies: set[DependencySpec] = set()
+    def extract_dependencies(self) -> set[Dependency] | None:
+        dependencies: set[Dependency] = set()
 
         if not self.install_requires:
             return None
@@ -55,7 +55,7 @@ class Setup_cfg(Manifest):
                 # TODO need to record pkg version as well!
                 pkg = re.split(r"[<>=~!]", dep)[0].strip()
                 if pkg:
-                    dependencies.add(DependencySpec(name=pkg, version=""))
+                    dependencies.add(Dependency(name=pkg, version=""))
 
         return dependencies
 
