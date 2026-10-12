@@ -1,5 +1,7 @@
 #+title: TODO
 
-* TODO Packages Required for this Plugin
+* TODO Host Packages Required for this Plugin
+The following packages should already be installed on the ACCRa VM:
 - curl
 - pyenv
+- uv

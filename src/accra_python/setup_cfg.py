@@ -20,10 +20,10 @@ class Setup_cfg(Manifest):
     def detect(self) -> bool:
         setupcfg_path: Path = self.spec.config.cwd / Path(self.spec.name)
 
-        if not Path.exists(setupcfg_path):
-            return False
-
         try:
+            if not Path.exists(setupcfg_path):
+                return False
+
             parser = configparser.ConfigParser()
             parser.read(setupcfg_path)
 
@@ -61,4 +61,4 @@ class Setup_cfg(Manifest):
 
     @override
     def get_supported_language_versions(self) -> set[str] | AccraError:
-        return utils.get_python_minor_versions(self.requires_python or "")
+        return utils.get_python_minor_versions(self.python_requires or "")

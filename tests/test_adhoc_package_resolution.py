@@ -1,19 +1,44 @@
 import shutil
 from pathlib import Path
 
-import pytest
-from accra_language import AccraError, AccraResult, Config, DockerfileInstruction
+from accra_language import AccraResult, Config, Dockerfile
 
-from accra_python import Python3
+from accra_python import (
+    _DOCKER_CREATE_USER,
+    _DOCKER_SETUP_WORKDIR,
+    _DOCKER_SWITCH_USER,
+    Python3,
+)
 
 
 def test_adhoc_package_resolution():
-    correct_dockerfile: list[DockerfileInstruction] = [
-        "FROM python:3.10",
-        "RUN curl -LsSf https://astral.sh/uv/install.sh | sh",
-        "RUN uv venv",
-        "RUN uv pip install PyYAML",
-    ]
+    correct = AccraResult(
+        dockerfile=Dockerfile(
+            pre_dependencies_installation=[
+                "FROM python:3.10",
+                "RUN curl -LsSf https://astral.sh/uv/install.sh | sh",
+                "RUN uv venv",
+            ],
+            dependencies_installation=["RUN uv pip install PyYAML"],
+        )
+    )
+
+    correct = AccraResult(
+        dockerfile=Dockerfile(
+            pre_dependencies_installation=[
+                "FROM python:3.10",
+                *_DOCKER_SETUP_WORKDIR,
+                *_DOCKER_CREATE_USER,
+                "RUN curl -LsSf https://astral.sh/uv/install.sh | sh",
+                "RUN git clone https://fake_repo",
+                "RUN uv venv",
+            ],
+            dependencies_installation=[
+                "RUN uv pip install PyYAML",
+            ],
+            post_dependencies_installation=[*_DOCKER_SWITCH_USER],
+        )
+    )
 
     project_dir = Path(__file__).resolve().parent / Path(
         "fixtures/adhoc-module-project"
@@ -24,20 +49,15 @@ def test_adhoc_package_resolution():
     shutil.copytree(project_dir, tmp_dir)
 
     try:
-        config = Config(cwd=tmp_dir)
+        config = Config(cwd=tmp_dir, repo="https://fake_repo")
         python3 = Python3(config)
 
         assert python3.detect()
 
         result: AccraResult = python3.build()
-        assert result
+        assert result.success
 
-        match result:
-            case list():
-                assert result == correct_dockerfile
-
-            case AccraError():
-                pytest.fail(result.message)
+        assert result == correct
 
     finally:
         shutil.rmtree(tmp_dir)

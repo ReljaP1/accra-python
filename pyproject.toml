@@ -9,7 +9,6 @@ authors = [
 requires-python = ">=3.12"
 dependencies = [
     "accra-language",
-    "pytest>=9.1.1",
     "vermin>=1.6.0",
 ]
 
@@ -26,4 +25,5 @@ accra-language = { git = "https://github.com/rumenmitov/accra-language" }
 [dependency-groups]
 dev = [
     "ruff>=0.16.9",
+    "pytest>=9.1.1",
 ]

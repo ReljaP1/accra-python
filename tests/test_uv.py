@@ -1,21 +1,34 @@
 import shutil
 from pathlib import Path
 
-from accra_language import AccraResult, Config
+from accra_language import AccraResult, Config, Dockerfile
 
-from accra_python import Python3
+from accra_python import (
+    _DOCKER_CREATE_USER,
+    _DOCKER_SETUP_WORKDIR,
+    _DOCKER_SWITCH_USER,
+    Python3,
+)
 
 
 def test_uv():
     correct = AccraResult(
-        dockerfile=[
-            "FROM python:3.14",
-            "RUN curl -LsSf https://astral.sh/uv/install.sh | sh",
-            "RUN uv sync",
-            "RUN uv add httpx",
-            "RUN uv add pydantic",
-            "RUN uv add rich",
-        ]
+        dockerfile=Dockerfile(
+            pre_dependencies_installation=[
+                "FROM python:3.14",
+                *_DOCKER_SETUP_WORKDIR,
+                *_DOCKER_CREATE_USER,
+                "RUN curl -LsSf https://astral.sh/uv/install.sh | sh",
+                "RUN git clone https://fake_repo",
+                "RUN uv sync",
+            ],
+            dependencies_installation=[
+                "RUN uv add httpx",
+                "RUN uv add pydantic",
+                "RUN uv add rich",
+            ],
+            post_dependencies_installation=[*_DOCKER_SWITCH_USER],
+        )
     )
 
     uv_sample_project_dir = Path(__file__).resolve().parent / Path(
@@ -27,7 +40,7 @@ def test_uv():
     shutil.copytree(uv_sample_project_dir, tmp_dir)
 
     try:
-        config = Config(cwd=tmp_dir)
+        config = Config(cwd=tmp_dir, repo="https://fake_repo")
         python3 = Python3(config)
 
         assert python3.detect()

@@ -5,7 +5,7 @@ requires-python = ">=3.12"
 [[package]]
 name = "accra-language"
 version = "0.1.0"
-source = { git = "https://github.com/rumenmitov/accra-language#a7681c0400be5b8d48ad03d7da0ebaa362f22f0d" }
+source = { git = "https://github.com/rumenmitov/accra-language#85e4f877c7b200fcd9b72ad7d58950b556e1045e" }
 dependencies = [
     { name = "pydantic" },
 ]
@@ -16,24 +16,26 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "accra-language" },
-    { name = "pytest" },
     { name = "vermin" },
 ]
 
 [package.dev-dependencies]
 dev = [
+    { name = "pytest" },
     { name = "ruff" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "accra-language", git = "https://github.com/rumenmitov/accra-language" },
-    { name = "pytest", specifier = ">=9.1.1" },
     { name = "vermin", specifier = ">=1.6.0" },
 ]
 
 [package.metadata.requires-dev]
-dev = [{ name = "ruff", specifier = ">=0.16.9" }]
+dev = [
+    { name = "pytest", specifier = ">=9.1.1" },
+    { name = "ruff", specifier = ">=0.16.9" },
+]
 
 [[package]]
 name = "annotated-types"

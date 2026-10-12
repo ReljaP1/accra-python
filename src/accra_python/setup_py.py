@@ -15,7 +15,11 @@ class Setup_py(Manifest):
     @override
     def detect(self) -> bool:
         setuppy_path: Path = self.spec.config.cwd / Path(self.spec.name)
-        return Path.exists(setuppy_path)
+
+        try:
+            return Path.exists(setuppy_path)
+        except Exception:  # noqa: BLE001
+            return False
 
     @override
     def extract_dependencies(self) -> set[Dependency] | None:

@@ -8,6 +8,7 @@ from accra_language import (
     AccraResult,
     Config,
     Dependency,
+    Dockerfile,
     DockerfileInstruction,
     EnvironmentManager,
     EnvironmentManagerSpec,
@@ -18,6 +19,7 @@ from .pyproject_toml import Pyproject_toml
 from .requirements_txt import Requirements_txt
 from .setup_cfg import Setup_cfg
 from .setup_py import Setup_py
+from .utils import _DOCKER_CREATE_USER, _DOCKER_SETUP_WORKDIR, _DOCKER_SWITCH_USER
 
 
 class Uv(EnvironmentManager):
@@ -44,43 +46,16 @@ class Uv(EnvironmentManager):
             ]
         )
 
-    def _install_uv(self) -> AccraError | None:
-        curl_result = subprocess.run(
-            ["curl", "-LsSf", "https://astral.sh/uv/install.sh"],
-            check=False,
-            capture_output=True,
-            text=True,
-            **self.spec.config.model_dump(),
-        )
-
-        if curl_result.returncode != 0:
-            return AccraInstallError(
-                message=f"could not install environment manager: {self.spec.name}-{self.spec.version}"
-            )
-
-        shell_result = subprocess.run(
-            ["sh"],
-            stdin=curl_result.stdout,
-            check=False,
-            capture_output=True,
-            text=True,
-            **self.spec.config.model_dump(),
-        )
-
-        if shell_result.returncode != 0:
-            return AccraInstallError(
-                message=f"could not install environment manager: {self.spec.name}-{self.spec.version}"
-            )
-
-        return None
-
     def _uv_pyproject_setup(self) -> AccraResult:
         uv_sync_result = subprocess.run(
             ["uv", "sync"],
             check=False,
             capture_output=True,
             text=True,
-            **self.spec.config.model_dump(),
+            cwd=self.spec.config.cwd,
+            env=self.spec.config.env,
+            shell=self.spec.config.shell,
+            timeout=self.spec.config.timeout,
         )
 
         if uv_sync_result.returncode != 0:
@@ -88,15 +63,22 @@ class Uv(EnvironmentManager):
                 errors=[AccraBuildError(message="uv sync failed")], success=False
             )
 
-        return AccraResult(dockerfile=[DockerfileInstruction("RUN uv sync")])
+        return AccraResult(
+            dockerfile=Dockerfile(
+                pre_dependencies_installation=[DockerfileInstruction("RUN uv sync")]
+            )
+        )
 
     def _uv_non_pyproject_setup(self) -> AccraResult:
         uv_venv_result = subprocess.run(
-            ["uv", "venv"],
+            ["uv", "venv", "--python", self.selected_language_version, "--seed"],
             check=False,
             capture_output=True,
             text=True,
-            **self.spec.config.model_dump(),
+            cwd=self.spec.config.cwd,
+            env=self.spec.config.env,
+            shell=self.spec.config.shell,
+            timeout=self.spec.config.timeout,
         )
 
         if uv_venv_result.returncode != 0:
@@ -104,10 +86,14 @@ class Uv(EnvironmentManager):
                 errors=[AccraBuildError(message="uv venv failed")], success=False
             )
 
-        return AccraResult(dockerfile=[DockerfileInstruction("RUN uv venv")])
+        return AccraResult(
+            dockerfile=Dockerfile(
+                pre_dependencies_installation=[DockerfileInstruction("RUN uv venv")]
+            )
+        )
 
     @override
-    def setup(self) -> AccraResult:
+    def pre_dependencies_installation(self) -> AccraResult:
         result = AccraResult()
 
         language_version: str | AccraError = self.select_language_version()
@@ -120,7 +106,10 @@ class Uv(EnvironmentManager):
             check=False,
             capture_output=True,
             text=True,
-            **self.spec.config.model_dump(),
+            cwd=self.spec.config.cwd,
+            env=self.spec.config.env,
+            shell=self.spec.config.shell,
+            timeout=self.spec.config.timeout,
         )
 
         if pyenv_result.returncode != 0:
@@ -132,26 +121,18 @@ class Uv(EnvironmentManager):
                 ]
             )
 
-        result.dockerfile.append(
-            DockerfileInstruction(f"FROM python:{language_version}"),
+        result.dockerfile.pre_dependencies_installation.append(
+            DockerfileInstruction(f"FROM python:{language_version}")
         )
 
-        # install uv (if not already installed)
-        uv_version_result = subprocess.run(
-            ["uv", "--version"],
-            check=False,
-            capture_output=True,
-            text=True,
-            **self.spec.config.model_dump(),
+        result.dockerfile.pre_dependencies_installation.extend(
+            _DOCKER_SETUP_WORKDIR + _DOCKER_CREATE_USER
         )
-
-        if uv_version_result.returncode != 0:
-            uv_install_error: AccraError | None = self._install_uv()
-            if uv_install_error:
-                return AccraResult(errors=[uv_install_error], success=False)
-
-        result.dockerfile.append(
+        result.dockerfile.pre_dependencies_installation.append(
             DockerfileInstruction("RUN curl -LsSf https://astral.sh/uv/install.sh | sh")
+        )
+        result.dockerfile.pre_dependencies_installation.append(
+            DockerfileInstruction(f"RUN git clone {self.spec.config.repo}")
         )
 
         # setup uv
@@ -170,7 +151,10 @@ class Uv(EnvironmentManager):
             check=False,
             capture_output=True,
             text=True,
-            **self.spec.config.model_dump(),
+            cwd=self.spec.config.cwd,
+            env=self.spec.config.env,
+            shell=self.spec.config.shell,
+            timeout=self.spec.config.timeout,
         )
 
         if install_result.returncode != 0:
@@ -183,11 +167,13 @@ class Uv(EnvironmentManager):
             )
 
         return AccraResult(
-            dockerfile=[
-                DockerfileInstruction(
-                    f"RUN uv add {dependency.name + dependency.version}"
-                )
-            ]
+            dockerfile=Dockerfile(
+                dependencies_installation=[
+                    DockerfileInstruction(
+                        f"RUN uv add {dependency.name + dependency.version}"
+                    )
+                ]
+            )
         )
 
     def _install_non_pyproject_dependency(self, dependency: Dependency) -> AccraResult:
@@ -196,7 +182,10 @@ class Uv(EnvironmentManager):
             check=False,
             capture_output=True,
             text=True,
-            **self.spec.config.model_dump(),
+            cwd=self.spec.config.cwd,
+            env=self.spec.config.env,
+            shell=self.spec.config.shell,
+            timeout=self.spec.config.timeout,
         )
 
         if install_result.returncode != 0:
@@ -209,11 +198,13 @@ class Uv(EnvironmentManager):
             )
 
         return AccraResult(
-            dockerfile=[
-                DockerfileInstruction(
-                    f"RUN uv pip install {dependency.name + dependency.version}"
-                )
-            ]
+            dockerfile=Dockerfile(
+                dependencies_installation=[
+                    DockerfileInstruction(
+                        f"RUN uv pip install {dependency.name + dependency.version}"
+                    )
+                ]
+            )
         )
 
     @override
@@ -225,3 +216,9 @@ class Uv(EnvironmentManager):
         )
 
         return result
+
+    @override
+    def post_dependencies_installation(self) -> AccraResult:
+        return AccraResult(
+            dockerfile=Dockerfile(post_dependencies_installation=_DOCKER_SWITCH_USER)
+        )

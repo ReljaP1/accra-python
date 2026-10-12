@@ -1,7 +1,29 @@
 from functools import cache
 
+from accra_language import DockerfileInstruction
 from packaging.specifiers import SpecifierSet
 from packaging.version import Version
+
+_DOCKER_SETUP_WORKDIR: list[DockerfileInstruction] = [
+    DockerfileInstruction("WORKDIR /app")
+]
+
+_DOCKER_CREATE_USER: list[DockerfileInstruction] = [
+    DockerfileInstruction(
+        'RUN adduser \
+                --disabled-password \
+                --gecos "" \
+                --home "/home/appuser" \
+                --shell "/bin/bash" \
+                --uid "10001" \
+                appuser'
+    )
+]
+
+_DOCKER_SWITCH_USER: list[DockerfileInstruction] = [
+    DockerfileInstruction("RUN chown -R appuser:appuser /app"),
+    DockerfileInstruction("USER appuser"),
+]
 
 
 @cache

@@ -22,10 +22,10 @@ class Pyproject_toml(Manifest):
     def detect(self) -> bool:
         pyproject_path: Path = self.spec.config.cwd / Path(self.spec.name)
 
-        if not Path.exists(pyproject_path):
-            return False
-
         try:
+            if not Path.exists(pyproject_path):
+                return False
+
             with open(pyproject_path, "rb") as f:
                 pyproject = tomllib.load(f)
 

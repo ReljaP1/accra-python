@@ -84,19 +84,14 @@ class Adhoc(Manifest):
         if top in sys.stdlib_module_names:  # py3.10+
             return None
 
-        # 1. explicit overrides, most specific match first
+        # explicit overrides, most specific match first
         parts = module.split(".")
         for i in range(len(parts), 0, -1):
             key = ".".join(parts[:i])
             if key in _ADHOC_PACKAGES:
                 return _ADHOC_PACKAGES[key]
 
-        # 2. look it up from what's installed in the environment
-        installed = installed if installed is not None else packages_distributions()
-        if top in installed:
-            return installed[top][0]
-
-        # 3. fall back to the import name itself
+        # fall back to the import name itself
         return top
 
     def _get_canonical_packages_from_code(code: str) -> set[str]:
@@ -105,6 +100,7 @@ class Adhoc(Manifest):
         packages: set[str] = {
             Adhoc._resolve_package(pkg, installed)
             for pkg in Adhoc._get_imported_modules(code)
+            if pkg
         }
 
         return packages
@@ -142,11 +138,21 @@ class Adhoc(Manifest):
         requires_python: str = "3"
 
         result = subprocess.run(
-            ["vermin", "-f", "parsable", self.spec.config.cwd or Path(".")],
+            [
+                "uv",
+                "run",
+                "vermin",
+                "-f",
+                "parsable",
+                self.spec.config.cwd or Path("."),
+            ],
             check=False,
             capture_output=True,
             text=True,
-            **self.spec.config.model_dump(),
+            cwd=self.spec.config.cwd,
+            env=self.spec.config.env,
+            shell=self.spec.config.shell,
+            timeout=self.spec.config.timeout,
         )
 
         if result.returncode != 0:
