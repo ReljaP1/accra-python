@@ -200,7 +200,7 @@ wheels = [
 ]
 
 [[package]]
-name = "uv-sample-project"
+name = "py3-sample-project"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [

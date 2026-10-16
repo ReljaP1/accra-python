@@ -5,9 +5,9 @@ from accra_language import AccraResult, Config, Dockerfile
 
 from accra_python import (
     _DOCKER_CREATE_USER,
-    _DOCKER_SETUP_WORKDIR,
     _DOCKER_SWITCH_USER,
     Python3,
+    docker_setup_workdir,
 )
 
 
@@ -16,21 +16,9 @@ def test_adhoc_package_resolution():
         dockerfile=Dockerfile(
             pre_dependencies_installation=[
                 "FROM python:3.10",
-                "RUN curl -LsSf https://astral.sh/uv/install.sh | sh",
-                "RUN uv venv",
-            ],
-            dependencies_installation=["RUN uv pip install PyYAML"],
-        )
-    )
-
-    correct = AccraResult(
-        dockerfile=Dockerfile(
-            pre_dependencies_installation=[
-                "FROM python:3.10",
-                *_DOCKER_SETUP_WORKDIR,
+                *docker_setup_workdir("https://fake_repo"),
                 *_DOCKER_CREATE_USER,
                 "RUN curl -LsSf https://astral.sh/uv/install.sh | sh",
-                "RUN git clone https://fake_repo",
                 "RUN uv venv",
             ],
             dependencies_installation=[

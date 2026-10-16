@@ -1,5 +1,5 @@
 [project]
-name = "uv-sample-project"
+name = "py3-sample-project"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
@@ -14,7 +14,7 @@ dependencies = [
 ]
 
 [project.scripts]
-uv-sample-project = "uv_sample_project:main"
+py3-sample-project = "py3_sample_project:main"
 
 [build-system]
 requires = ["uv_build>=0.12.19,<0.13.0"]

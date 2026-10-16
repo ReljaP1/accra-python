@@ -19,7 +19,12 @@ from .pyproject_toml import Pyproject_toml
 from .requirements_txt import Requirements_txt
 from .setup_cfg import Setup_cfg
 from .setup_py import Setup_py
-from .utils import _DOCKER_CREATE_USER, _DOCKER_SETUP_WORKDIR, _DOCKER_SWITCH_USER
+from .utils import (
+    _DOCKER_CREATE_USER,
+    _DOCKER_SWITCH_USER,
+    docker_setup_workdir,
+    pyenv_project_setup,
+)
 
 
 class Uv(EnvironmentManager):
@@ -101,38 +106,21 @@ class Uv(EnvironmentManager):
             return AccraResult(errors=[language_version], success=False)
 
         # install python
-        pyenv_result = subprocess.run(
-            ["pyenv", "install", "--skip-existing", language_version],
-            check=False,
-            capture_output=True,
-            text=True,
-            cwd=self.spec.config.cwd,
-            env=self.spec.config.env,
-            shell=self.spec.config.shell,
-            timeout=self.spec.config.timeout,
+        pyenv_error: AccraError | None = pyenv_project_setup(
+            language_version, self.spec.config
         )
-
-        if pyenv_result.returncode != 0:
-            return AccraResult(
-                errors=[
-                    AccraInstallError(
-                        message=f"pyenv could not install python version: {language_version}"
-                    )
-                ]
-            )
+        if isinstance(pyenv_error, AccraError):
+            return AccraResult(errors=[pyenv_error], success=False)
 
         result.dockerfile.pre_dependencies_installation.append(
             DockerfileInstruction(f"FROM python:{language_version}")
         )
 
         result.dockerfile.pre_dependencies_installation.extend(
-            _DOCKER_SETUP_WORKDIR + _DOCKER_CREATE_USER
+            docker_setup_workdir(self.spec.config.repo) + _DOCKER_CREATE_USER
         )
         result.dockerfile.pre_dependencies_installation.append(
             DockerfileInstruction("RUN curl -LsSf https://astral.sh/uv/install.sh | sh")
-        )
-        result.dockerfile.pre_dependencies_installation.append(
-            DockerfileInstruction(f"RUN git clone {self.spec.config.repo}")
         )
 
         # setup uv
