@@ -1,4 +1,5 @@
 import configparser
+import logging
 import re
 from pathlib import Path
 from typing import override
@@ -6,6 +7,8 @@ from typing import override
 from accra_language import AccraError, Config, Dependency, Manifest, ManifestSpec
 
 from . import utils
+
+logger = logging.getLogger(__name__)
 
 
 class Setup_cfg(Manifest):
@@ -24,7 +27,7 @@ class Setup_cfg(Manifest):
             if not Path.exists(setupcfg_path):
                 return False
 
-            parser = configparser.ConfigParser()
+            parser = configparser.ConfigParser(interpolation=None)
             parser.read(setupcfg_path)
 
             if parser.has_section("options") and parser.has_option(
@@ -39,7 +42,10 @@ class Setup_cfg(Manifest):
 
             return True
 
-        except Exception:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "cannot read %s: %s: %s", self.spec.name, type(exc).__name__, exc
+            )
             return False
 
     @override
@@ -50,15 +56,20 @@ class Setup_cfg(Manifest):
             return None
 
         for dep in self.install_requires.splitlines():
-            dep = dep.strip()
-            if dep and not dep.startswith("#"):
-                # TODO need to record pkg version as well!
+            dep = re.split(r"\s+#", dep.strip(), maxsplit=1)[0].strip()
+            if not dep or dep.startswith(("#", "file:", "attr:")):
+                continue
+            dependency = utils.requirement_dependency(dep)
+            if dependency is None:
                 pkg = re.split(r"[<>=~!]", dep)[0].strip()
-                if pkg:
-                    dependencies.add(Dependency(name=pkg, version=""))
+                dependency = Dependency(name=pkg, version="") if pkg else None
+            if dependency is not None and not dependency.name.startswith("-"):
+                dependencies.add(dependency)
 
         return dependencies
 
     @override
     def get_supported_language_versions(self) -> set[str] | AccraError:
-        return utils.get_python_minor_versions(self.python_requires or "")
+        return utils.get_python_minor_versions(
+            self.python_requires or "", self.spec.config
+        )

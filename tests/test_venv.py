@@ -1,41 +1,25 @@
 import shutil
 from pathlib import Path
 
-from accra_language import AccraResult, Config, Dockerfile
+import pytest
+from accra_language import AccraResult, Config, Dependency, Dockerfile
 
 from accra_python import (
-    _DOCKER_CREATE_USER,
-    _DOCKER_SWITCH_USER,
+    DOCKER_NATIVE_PACKAGES,
     Python3,
     Venv,
-    docker_setup_workdir,
+    docker_activate_environment,
+    docker_python_toolchain,
 )
 
 
-def test_venv():
-    correct = AccraResult(
-        dockerfile=Dockerfile(
-            pre_dependencies_installation=[
-                "FROM python:3.14",
-                *docker_setup_workdir("https://fake_repo"),
-                *_DOCKER_CREATE_USER,
-                "RUN python -m venv venv",
-            ],
-            dependencies_installation=[
-                "RUN venv/bin/python -m pip install httpx",
-                "RUN venv/bin/python -m pip install pydantic",
-                "RUN venv/bin/python -m pip install rich",
-            ],
-            post_dependencies_installation=[*_DOCKER_SWITCH_USER],
-        )
-    )
-
+@pytest.mark.integration
+def test_venv(tmp_path):
     py3_sample_project_dir = Path(__file__).resolve().parent / Path(
         "fixtures/py3-sample-project"
     )
-    tmp_dir = Path("/tmp/py3-sample-project")
+    tmp_dir = tmp_path / "py3-sample-project"
 
-    shutil.rmtree(tmp_dir, ignore_errors=True)
     shutil.copytree(py3_sample_project_dir, tmp_dir)
 
     try:
@@ -48,7 +32,33 @@ def test_venv():
         result: AccraResult = python3.build()
         assert result.success
 
-        assert result == correct
+        version = venv.selected_language_version
+        assert version.startswith("3.14")
+        pinned = {
+            name: venv.installed_version(Dependency(name=name, version=""))
+            for name in ("httpx", "pydantic", "rich")
+        }
+        assert all(pinned.values())
+        assert result == AccraResult(
+            dockerfile=Dockerfile(
+                base_image=f"python:{version}",
+                toolchain_installation=docker_python_toolchain(version),
+                pre_dependencies_installation=[
+                    DOCKER_NATIVE_PACKAGES,
+                    (
+                        f"RUN $(uv python find {version} 2>/dev/null || command -v python)"
+                        " -m venv venv"
+                    ),
+                    *docker_activate_environment("venv"),
+                ],
+                dependencies_installation=[
+                    # pinned to the installed version
+                    f"RUN venv/bin/python -m pip install httpx=={pinned['httpx']}",
+                    f"RUN venv/bin/python -m pip install pydantic=={pinned['pydantic']}",
+                    f"RUN venv/bin/python -m pip install rich=={pinned['rich']}",
+                ],
+            )
+        )
 
     finally:
         shutil.rmtree(tmp_dir)

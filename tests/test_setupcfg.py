@@ -6,17 +6,16 @@ from accra_language import AccraError, Config, Dependency
 from accra_python import Setup_cfg
 
 
-def test_setupcfg():
+def test_setupcfg(tmp_path):
     correct_dependencies: set[Dependency] = {
-        Dependency(name="requests", version=""),
-        Dependency(name="numpy", version=""),
-        Dependency(name="click", version=""),
+        Dependency(name="requests", version=">=2.28"),
+        Dependency(name="numpy", version=">=1.24"),
+        Dependency(name="click", version=">=8.1"),
     }
 
     project_dir = Path(__file__).resolve().parent / Path("fixtures/setup_cfg-project")
-    tmp_dir = Path("/tmp/setup_cfg-project")
+    tmp_dir = tmp_path / "setup_cfg-project"
 
-    shutil.rmtree(tmp_dir, ignore_errors=True)
     shutil.copytree(project_dir, tmp_dir)
 
     try:
