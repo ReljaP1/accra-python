@@ -14,7 +14,6 @@ Stdlib only, so it runs anywhere the repository can be parsed.
 from __future__ import annotations
 
 import ast
-import logging
 from collections.abc import Iterable
 from pathlib import Path
 
@@ -25,8 +24,6 @@ from accra_language import (
     ScriptProfile,
     ScriptReading,
 )
-
-logger = logging.getLogger(__name__)
 
 # The profile ACCRa's prompts use for Python.
 PYTHON_SCRIPT_PROFILE = ScriptProfile(
@@ -231,8 +228,7 @@ def _arg_is_constructed(
     """True when this argument was built by the script, not copied in."""
     try:
         source = ast.unparse(arg)
-    except (ValueError, RecursionError, MemoryError, TypeError) as exc:
-        logger.debug("cannot unparse a call argument: %s: %s", type(exc).__name__, exc)
+    except (ValueError, RecursionError, MemoryError, TypeError):
         source = ""
     # An argument copied verbatim from an inferred CLI input is not constructed.
     if source and source.strip("'\"") in inferred_inputs:

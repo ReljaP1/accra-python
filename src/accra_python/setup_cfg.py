@@ -1,5 +1,4 @@
 import configparser
-import logging
 import re
 from pathlib import Path
 from typing import override
@@ -7,8 +6,6 @@ from typing import override
 from accra_language import AccraError, Config, Dependency, Manifest, ManifestSpec
 
 from . import utils
-
-logger = logging.getLogger(__name__)
 
 
 class Setup_cfg(Manifest):
@@ -42,10 +39,7 @@ class Setup_cfg(Manifest):
 
             return True
 
-        except Exception as exc:  # noqa: BLE001
-            logger.warning(
-                "cannot read %s: %s: %s", self.spec.name, type(exc).__name__, exc
-            )
+        except Exception:  # noqa: BLE001
             return False
 
     @override

@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import ast
 import hashlib
-import logging
 import os
 import re
 import threading
@@ -17,8 +16,6 @@ from fnmatch import fnmatch
 from pathlib import Path
 
 from . import utils
-
-logger = logging.getLogger(__name__)
 
 # Directories the selection never walks into.
 _SKIP_DIR_PATTERNS = (
@@ -55,11 +52,9 @@ def _read(path: Path) -> str | None:
     except UnicodeDecodeError:
         try:
             return path.read_text(encoding="latin-1")
-        except OSError as exc:
-            logger.warning("cannot read %s: %s", path, exc)
+        except OSError:
             return None
-    except OSError as exc:
-        logger.warning("cannot read %s: %s", path, exc)
+    except OSError:
         return None
 
 
@@ -114,8 +109,8 @@ def _selected_files(project: Path):
             path = Path(dirpath) / filename
             try:
                 yield path, path.stat()
-            except OSError as exc:
-                logger.warning("cannot read %s: %s", path, exc)
+            except OSError:
+                pass
 
 
 def _fingerprint(files: list[tuple[Path, os.stat_result]]) -> str:
@@ -153,12 +148,6 @@ def python_sources(project: Path) -> list[tuple[Path, str, set[str]]]:
     sources = []
     for path, st in files:
         if st.st_size > MAX_SOURCE_BYTES:
-            logger.debug(
-                "skipping %s: %d bytes is over the %d byte source cap",
-                path,
-                st.st_size,
-                MAX_SOURCE_BYTES,
-            )
             continue
         content = _read(path)
         if content is None or not content.strip():

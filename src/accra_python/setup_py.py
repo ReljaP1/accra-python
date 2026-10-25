@@ -1,5 +1,4 @@
 import ast
-import logging
 import re
 from pathlib import Path
 from typing import override
@@ -7,8 +6,6 @@ from typing import override
 from accra_language import AccraError, Config, Dependency, Manifest, ManifestSpec
 
 from . import utils
-
-logger = logging.getLogger(__name__)
 
 _MAX_NAME_DEPTH = 10
 
@@ -72,8 +69,7 @@ class Setup_py(Manifest):
 
         try:
             return Path.exists(setuppy_path)
-        except OSError as exc:
-            logger.warning("cannot check %s: %s", setuppy_path, exc)
+        except OSError:
             return False
 
     @override
@@ -145,13 +141,7 @@ class Setup_py(Manifest):
                                 # TODO extract dependency version!
                                 dependencies.add(Dependency(name=pkg, version=""))
 
-        except Exception as exc:  # noqa: BLE001
-            logger.warning(
-                "cannot read dependencies of %s: %s: %s",
-                setuppy_path,
-                type(exc).__name__,
-                exc,
-            )
+        except Exception:  # noqa: BLE001
             return None
 
         return dependencies
@@ -176,7 +166,7 @@ class Setup_py(Manifest):
                     if match:
                         requires_python = match.group(1)
 
-        except OSError as exc:
-            logger.warning("cannot read %s: %s", setuppy_path, exc)
+        except OSError:
+            pass
 
         return utils.get_python_minor_versions(requires_python, self.spec.config)

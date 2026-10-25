@@ -44,6 +44,7 @@ class Venv(PythonEnvironment, EnvironmentManager):
                 Setup_py(config),
             },
             config=config,
+            version_order=utils.version_order,
         )
         super().__init__(spec)
 
@@ -68,11 +69,10 @@ class Venv(PythonEnvironment, EnvironmentManager):
         if isinstance(pyenv_error, AccraError):
             return AccraResult(errors=[pyenv_error], success=False)
 
-        result.dockerfile.base_image = f"python:{language_version}"
-        result.dockerfile.toolchain_installation.extend(
-            docker_python_toolchain(language_version)
+        # the toolchain first: the caller's base image has no Python or uv
+        result.dockerfile.pre_dependencies_installation.extend(
+            [*docker_python_toolchain(language_version), DOCKER_NATIVE_PACKAGES]
         )
-        result.dockerfile.pre_dependencies_installation.append(DOCKER_NATIVE_PACKAGES)
 
         # setup venv
         # PYENV_VERSION selects the interpreter without `pyenv local`, which
@@ -102,7 +102,6 @@ class Venv(PythonEnvironment, EnvironmentManager):
             result.extend(AccraResult(errors=[repair_error], success=False))
             return result
 
-        # the base's python, else the one the toolchain steps installed
         result.dockerfile.pre_dependencies_installation.append(
             DockerfileInstruction(
                 f"RUN $(uv python find {language_version} 2>/dev/null || command -v python)"
@@ -184,8 +183,3 @@ class Venv(PythonEnvironment, EnvironmentManager):
     def post_dependencies_installation(self) -> AccraResult:
         # the user and `chown` are the composing caller's
         return AccraResult()
-
-    @override
-    def choose_language_version(self, versions: set[str]) -> str:
-        """The preferred version (`utils.preferred_version`)."""
-        return utils.preferred_version(versions)

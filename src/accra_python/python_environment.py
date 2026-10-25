@@ -3,7 +3,6 @@ optional parts of the accra-language contract)."""
 
 import csv
 import json
-import logging
 import os
 import re
 import subprocess
@@ -26,8 +25,6 @@ from accra_language import (
 from . import utils
 from .import_names import IMPORT_NAMES
 from .sources import is_main_file, python_sources
-
-logger = logging.getLogger(__name__)
 
 # Directories that never hold the project's own entry points.
 _EXCLUDED_DIRS: set[str] = {
@@ -237,10 +234,7 @@ class PythonEnvironment:
         try:
             info = self._distribution_dir(utils.dependency_base_name(dependency))
             return self._distribution_version(info) if info is not None else None
-        except (subprocess.SubprocessError, OSError) as exc:
-            logger.warning(
-                "cannot read the installed version of %s: %s", dependency.name, exc
-            )
+        except (subprocess.SubprocessError, OSError):
             return None
 
     def pinned_spec(self, dependency: Dependency) -> str:
@@ -251,10 +245,7 @@ class PythonEnvironment:
         spec = dependency.name + dependency.version
         try:
             version = self.installed_version(dependency)
-        except (subprocess.SubprocessError, OSError) as exc:
-            logger.warning(
-                "cannot read the installed version of %s: %s", dependency.name, exc
-            )
+        except (subprocess.SubprocessError, OSError):
             version = None
         if version is None:
             return spec
@@ -275,8 +266,7 @@ class PythonEnvironment:
             if self.installed_version(dependency) is None:
                 return None
             usable = self.is_usable(dependency)
-        except (subprocess.SubprocessError, OSError) as exc:
-            logger.warning("cannot check that %s is usable: %s", dependency.name, exc)
+        except (subprocess.SubprocessError, OSError):
             return None
         if usable is not False:
             return None
@@ -382,8 +372,7 @@ class PythonEnvironment:
 
         try:
             result = self._install_dependency(Dependency(name="setuptools", version=""))
-        except (subprocess.SubprocessError, OSError) as exc:
-            logger.warning("could not install setuptools before the project: %s", exc)
+        except (subprocess.SubprocessError, OSError):
             result = AccraResult()
         env = dict(self.spec.config.env or os.environ)
         timeout = _positive_seconds(env.get("ACCRA_PROJECT_INSTALL_TIMEOUT"))
@@ -501,8 +490,7 @@ class PythonEnvironment:
                     self.spec.config,
                     self._import_timeout(),
                 )
-            except (subprocess.SubprocessError, OSError) as exc:
-                logger.warning("cannot test the import of %s: %s", candidate, exc)
+            except (subprocess.SubprocessError, OSError):
                 undecided = True
                 continue
             if imported.returncode == 0:
@@ -527,8 +515,7 @@ class PythonEnvironment:
         mapped = import_name_for(base)
         try:
             usable = self.is_usable(dependency, [mapped] if mapped else ())
-        except (subprocess.SubprocessError, OSError) as exc:
-            logger.warning("cannot check that %s is usable: %s", dependency.name, exc)
+        except (subprocess.SubprocessError, OSError):
             return False
         return usable is True
 

@@ -41,9 +41,8 @@ def test_venv(tmp_path):
         assert all(pinned.values())
         assert result == AccraResult(
             dockerfile=Dockerfile(
-                base_image=f"python:{version}",
-                toolchain_installation=docker_python_toolchain(version),
                 pre_dependencies_installation=[
+                    *docker_python_toolchain(version),
                     DOCKER_NATIVE_PACKAGES,
                     (
                         f"RUN $(uv python find {version} 2>/dev/null || command -v python)"

@@ -1,4 +1,3 @@
-import logging
 import re
 from pathlib import Path
 from typing import override
@@ -6,8 +5,6 @@ from typing import override
 from accra_language import AccraError, Config, Dependency, Manifest, ManifestSpec
 
 from . import utils
-
-logger = logging.getLogger(__name__)
 
 
 def _inside(path: Path, root: Path) -> bool:
@@ -29,8 +26,7 @@ class Requirements_txt(Manifest):
 
         try:
             return Path.exists(requirements_txt_path)
-        except OSError as exc:
-            logger.warning("cannot check %s: %s", requirements_txt_path, exc)
+        except OSError:
             return False
 
     def _parse_requirements(

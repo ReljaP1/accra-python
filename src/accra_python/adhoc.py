@@ -1,5 +1,4 @@
 import ast
-import logging
 import os
 import re
 import sys
@@ -19,8 +18,6 @@ from accra_language import (
 from . import utils
 from .import_names import IMPORT_NAMES
 from .sources import MAX_SOURCE_BYTES
-
-logger = logging.getLogger(__name__)
 
 _ADHOC_PACKAGES: Mapping[str, str] = {
     "google.auth": "google-auth",
@@ -290,7 +287,7 @@ class Adhoc(Manifest):
     def _file_bytes(self, path: Path) -> bytes | None:
         """The bytes of a project file, read once per `extract_dependencies`
         call: its two scans read the files of the project's own packages both.
-        None when unreadable or over the source cap (logged at debug). The
+        None when unreadable or over the source cap. The
         cache lives only for that call (see `extract_dependencies`), so a
         changed tree is always re-read."""
         cache = getattr(self, "_bytes", None)
@@ -299,7 +296,6 @@ class Adhoc(Manifest):
         data: bytes | None
         try:
             if path.stat().st_size > MAX_SOURCE_BYTES:
-                logger.debug("skipping %s: over the source cap", path)
                 data = None
             else:
                 data = path.read_bytes()

@@ -92,23 +92,6 @@ def test_run_environment_puts_the_import_roots_first(tmp_path):
     assert env["PYTHONPATH"] == f"{root}:{root / 'scripts'}:/x"
 
 
-def test_maturin_build_covers_its_cargo_manifest(tmp_path):
-    _write(
-        tmp_path,
-        {
-            "pyproject.toml": '[build-system]\nrequires = ["maturin>=1"]\nbuild-backend = "maturin"\n',
-            "Cargo.toml": "[package]\nname = 'ext'\n",
-        },
-    )
-    assert Python3(Config(cwd=tmp_path)).covered_manifests() == {
-        tmp_path / "Cargo.toml"
-    }
-
-    plain = tmp_path / "plain"
-    _write(plain, {"pyproject.toml": "[project]\nname = 'x'\n", "Cargo.toml": ""})
-    assert Python3(Config(cwd=plain)).covered_manifests() == set()
-
-
 def test_installed_patch_resolution(tmp_path, monkeypatch):
     listed = "2.7.18\n3.11.2\n3.11.12\n3.12.10\n3.11.4/envs/x\n"
     monkeypatch.setattr(

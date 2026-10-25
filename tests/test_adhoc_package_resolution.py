@@ -5,7 +5,6 @@ import pytest
 from accra_language import AccraResult, Config, Dependency, Dockerfile
 
 from accra_python import (
-    DOCKER_INSTALL_UV,
     DOCKER_NATIVE_PACKAGES,
     Python3,
     docker_activate_environment,
@@ -42,10 +41,8 @@ def test_adhoc_package_resolution(tmp_path):
         assert pyyaml
         assert result == AccraResult(
             dockerfile=Dockerfile(
-                base_image=f"python:{version}",
-                toolchain_installation=docker_python_toolchain(version),
                 pre_dependencies_installation=[
-                    DOCKER_INSTALL_UV,
+                    *docker_python_toolchain(version),
                     DOCKER_NATIVE_PACKAGES,
                     f"RUN uv venv --seed --python {version}",
                     *docker_activate_environment(".venv"),

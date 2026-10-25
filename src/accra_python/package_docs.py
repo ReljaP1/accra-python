@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import http.client
 import json
-import logging
 import re
 import urllib.error
 import urllib.parse
@@ -21,8 +20,6 @@ from pathlib import Path
 from accra_language import PackageDocs
 
 from . import utils
-
-logger = logging.getLogger(__name__)
 
 REGISTRY = "PyPI"
 DEFAULT_TIMEOUT = 8
@@ -56,11 +53,8 @@ def package_documentation(
         http.client.HTTPException,
         OSError,
         ValueError,
-    ) as exc:
+    ):
         # no entry (404), an HTTP error, no network, a timeout or not JSON
-        logger.debug(
-            "no PyPI documentation for %s: %s: %s", name, type(exc).__name__, exc
-        )
         return None
 
     info = (payload.get("info") or {}) if isinstance(payload, dict) else {}
@@ -87,8 +81,7 @@ def _read_text(path: Path) -> str | None:
         return None
     try:
         return path.read_text(encoding="utf-8", errors="ignore")
-    except OSError as exc:
-        logger.warning("cannot read %s: %s", path, exc)
+    except OSError:
         return None
 
 

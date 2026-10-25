@@ -1,5 +1,3 @@
-import logging
-import tomllib
 from pathlib import Path
 from typing import override
 
@@ -16,8 +14,6 @@ from .analyzers import Memray, Scalene
 from .project_analyzers import Network, Parallelism
 from .python_environment import is_python_project
 from .uv import Uv
-
-logger = logging.getLogger(__name__)
 
 # What the env managers run on the host: uv and pyenv (which builds Pythons
 # from source, hence its build dependencies), and git for `uv` VCS installs.
@@ -120,31 +116,6 @@ class Python3(Language):
             **_analyzers(config),
         )
         super().__init__(spec, env_manager=env_manager)
-
-    @override
-    def covered_manifests(self) -> set[Path]:
-        """The `Cargo.toml` a Rust-extension build backend (maturin,
-        setuptools-rust) compiles as part of the Python build."""
-        project = Path(self.spec.config.cwd or ".")
-        try:
-            with open(project / "pyproject.toml", "rb") as f:
-                pyproject = tomllib.load(f)
-        except FileNotFoundError:
-            return set()
-        except (OSError, tomllib.TOMLDecodeError) as exc:
-            logger.warning("cannot read %s: %s", project / "pyproject.toml", exc)
-            return set()
-        build = pyproject.get("build-system", {})
-        requires = " ".join(str(r) for r in build.get("requires", []))
-        backend = str(build.get("build-backend", ""))
-        if (
-            "maturin" not in backend + requires
-            and "setuptools-rust" not in requires.replace("_", "-")
-        ):
-            return set()
-        manifest = pyproject.get("tool", {}).get("maturin", {}).get("manifest-path")
-        cargo = project / (manifest or "Cargo.toml")
-        return {cargo} if cargo.is_file() else set()
 
     @override
     def is_present(self) -> bool:

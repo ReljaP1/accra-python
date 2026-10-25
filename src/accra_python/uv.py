@@ -21,7 +21,6 @@ from .requirements_txt import Requirements_txt
 from .setup_cfg import Setup_cfg
 from .setup_py import Setup_py
 from .utils import (
-    DOCKER_INSTALL_UV,
     DOCKER_NATIVE_PACKAGES,
     docker_activate_environment,
     docker_install,
@@ -48,6 +47,7 @@ class Uv(PythonEnvironment, EnvironmentManager):
                 Setup_py(config),
             },
             config=config,
+            version_order=utils.version_order,
         )
         super().__init__(spec)
 
@@ -101,12 +101,6 @@ class Uv(PythonEnvironment, EnvironmentManager):
         )
 
     @override
-    def choose_language_version(self, versions: set[str]) -> str:
-        """Python 3.11, 3.10, 3.9, 3.8, 3.7, 3.12, 3.6 in that order, else the
-        highest (`utils.preferred_version`)."""
-        return utils.preferred_version(versions)
-
-    @override
     def pre_dependencies_installation(self) -> AccraResult:
         result = AccraResult()
 
@@ -127,12 +121,9 @@ class Uv(PythonEnvironment, EnvironmentManager):
         if isinstance(pyenv_error, AccraError):
             return AccraResult(errors=[pyenv_error], success=False)
 
-        result.dockerfile.base_image = f"python:{language_version}"
-        result.dockerfile.toolchain_installation.extend(
-            docker_python_toolchain(language_version)
-        )
+        # the toolchain first: the caller's base image has no Python or uv
         result.dockerfile.pre_dependencies_installation.extend(
-            [DOCKER_INSTALL_UV, DOCKER_NATIVE_PACKAGES]
+            [*docker_python_toolchain(language_version), DOCKER_NATIVE_PACKAGES]
         )
 
         # setup uv

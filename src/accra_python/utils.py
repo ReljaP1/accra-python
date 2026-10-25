@@ -1,6 +1,5 @@
 import ast
 import configparser
-import logging
 import os
 import re
 import shlex
@@ -20,8 +19,6 @@ from accra_language import (
 from packaging.requirements import InvalidRequirement, Requirement
 from packaging.specifiers import InvalidSpecifier, SpecifierSet
 from packaging.version import InvalidVersion, Version
-
-logger = logging.getLogger(__name__)
 
 # NOTE pyenv cannot install minor version < 5 on Debian
 _MIN_MINOR_VERSION = 5
@@ -194,7 +191,7 @@ def highest_version(versions: set[str]) -> str:
     return max(versions, key=lambda version: (_version_key(version), version))
 
 
-# Stable modern versions first, else the highest.
+# Stable modern versions first, then the others, highest first.
 PREFERRED_PYTHON_VERSIONS: tuple[str, ...] = (
     "3.11",
     "3.10",
@@ -206,16 +203,23 @@ PREFERRED_PYTHON_VERSIONS: tuple[str, ...] = (
 )
 
 
-def preferred_version(versions: set[str]) -> str:
-    """The first of `PREFERRED_PYTHON_VERSIONS` among `versions` (its highest
-    patch), else the highest version."""
+def version_order(versions: set[str]) -> list[str]:
+    """`versions` most preferred first: each of `PREFERRED_PYTHON_VERSIONS` in
+    that order (its patch versions highest first), then the rest, highest
+    first."""
+    ordered: list[str] = []
     for preferred in PREFERRED_PYTHON_VERSIONS:
         matches = {
             v for v in versions if v == preferred or v.startswith(preferred + ".")
         }
-        if matches:
-            return highest_version(matches)
-    return highest_version(versions)
+        ordered.extend(sorted(matches, key=_descending))
+    rest = versions - set(ordered)
+    return ordered + sorted(rest, key=_descending)
+
+
+def _descending(version: str) -> tuple[tuple[int, ...], str]:
+    key = _version_key(version)
+    return tuple(-part for part in key), version
 
 
 _PATCH_VERSION_RE = re.compile(r"\d+\.\d+\.\d+")
@@ -280,12 +284,74 @@ DOCKER_NATIVE_PACKAGES = DockerfileInstruction(
 )
 
 
+# Where the image keeps the interpreters it installs: readable by `appuser`,
+# since the steps run as root and a venv links to its interpreter.
+DOCKER_UV_PYTHON_DIR = "/opt/uv-python"
+DOCKER_PYENV_ROOT = "/opt/pyenv"
+
+# uv installs prebuilt CPythons from 3.8 on; older ones are compiled with pyenv.
+_FIRST_PREBUILT_MINOR = 8
+
+# What compiling CPython needs on a bare Debian image.
+_DOCKER_PYENV_BUILD_PACKAGES: tuple[str, ...] = (
+    "build-essential",
+    "libssl-dev",
+    "zlib1g-dev",
+    "libbz2-dev",
+    "libreadline-dev",
+    "libsqlite3-dev",
+    "libffi-dev",
+    "liblzma-dev",
+    "libncurses5-dev",
+    "libncursesw5-dev",
+    "xz-utils",
+    "tk-dev",
+)
+
+
+def docker_builds_python_from_source(version: str) -> bool:
+    """Whether the image compiles Python `version` with pyenv (no prebuilt
+    CPython of it exists) instead of installing uv's."""
+    parts = version.split(".")
+    return (
+        len(parts) >= 2
+        and parts[0] == "3"
+        and parts[1].isdigit()
+        and int(parts[1]) < _FIRST_PREBUILT_MINOR
+    )
+
+
 def docker_python_toolchain(version: str) -> list[DockerfileInstruction]:
-    """Installs Python `version` on a base that does not have it."""
-    return [
+    """Installs Python `version` on the caller's bare Debian image (`curl`,
+    `git` and CA certificates exist, compilers do not): uv, then either uv's
+    prebuilt CPython or, below 3.8, one compiled with pyenv and put on PATH as
+    `python3.<minor>`."""
+    steps = [
         DOCKER_INSTALL_UV,
-        DockerfileInstruction(f"RUN uv python install {version}"),
+        DockerfileInstruction(f"ENV UV_PYTHON_INSTALL_DIR={DOCKER_UV_PYTHON_DIR}"),
     ]
+    if not docker_builds_python_from_source(version):
+        steps.append(DockerfileInstruction(f"RUN uv python install {version}"))
+        return steps
+
+    pyenv = f"PYENV_ROOT={DOCKER_PYENV_ROOT} {DOCKER_PYENV_ROOT}/bin/pyenv"
+    minor = ".".join(version.split(".")[:2])
+    steps += [
+        DockerfileInstruction(
+            "RUN apt-get update && apt-get install -y "
+            + " ".join(_DOCKER_PYENV_BUILD_PACKAGES)
+        ),
+        DockerfileInstruction(
+            f"RUN [ -d {DOCKER_PYENV_ROOT}/.git ] || git clone --depth 1 "
+            f"https://github.com/pyenv/pyenv.git {DOCKER_PYENV_ROOT}"
+        ),
+        DockerfileInstruction(f"RUN {pyenv} install --skip-existing {version}"),
+        DockerfileInstruction(
+            f'RUN ln -sf "$({pyenv} prefix {version})/bin/python" '
+            f"/usr/local/bin/python{minor}"
+        ),
+    ]
+    return steps
 
 
 def docker_activate_environment(
@@ -485,19 +551,15 @@ def _distribution_names(cwd: Path) -> set[str]:
         names.add(pyproject.get("tool", {}).get("poetry", {}).get("name", ""))
     except FileNotFoundError:
         pass
-    except Exception as exc:  # noqa: BLE001
-        logger.warning(
-            "cannot read %s: %s: %s", cwd / "pyproject.toml", type(exc).__name__, exc
-        )
+    except Exception:  # noqa: BLE001, S110
+        pass
 
     try:
         setup_cfg = configparser.ConfigParser(interpolation=None)
         setup_cfg.read(cwd / "setup.cfg", encoding="utf-8")
         names.add(setup_cfg.get("metadata", "name", fallback=""))
-    except configparser.Error as exc:
-        logger.warning(
-            "cannot read %s: %s: %s", cwd / "setup.cfg", type(exc).__name__, exc
-        )
+    except configparser.Error:
+        pass
 
     try:
         setup_py = (cwd / "setup.py").read_text(encoding="utf-8", errors="ignore")
@@ -506,10 +568,8 @@ def _distribution_names(cwd: Path) -> set[str]:
             names.add(setup_name)
     except FileNotFoundError:
         pass
-    except (OSError, ValueError) as exc:
-        logger.warning(
-            "cannot read %s: %s: %s", cwd / "setup.py", type(exc).__name__, exc
-        )
+    except (OSError, ValueError):
+        pass
 
     return {name for name in names if isinstance(name, str) and name}
 
