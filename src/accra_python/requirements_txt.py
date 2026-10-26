@@ -90,7 +90,7 @@ class Requirements_txt(Manifest):
             dependency = utils.requirement_dependency(line)
             if dependency is None:
                 # else the name before the first specifier
-                name = re.split(r"[<>=~!]", line)[0].strip()
+                name = re.split(r"[<>=~!;]", line)[0].strip()
                 if name and not name.startswith("-"):
                     dependency = Dependency(name=name, version="")
             if dependency is not None and not dependency.name.startswith("-"):

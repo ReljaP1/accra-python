@@ -178,7 +178,9 @@ def test_a_real_install_with_renamed_imports_and_false_markers(tmp_path):
     lines = [str(i) for i in result.dockerfile.dependencies_installation]
     assert any("scikit-learn==" in line for line in lines)
     assert any("beautifulsoup4==" in line for line in lines)
-    assert any("colorama" in line and "Windows" in line for line in lines)
+    # a package whose marker is false for the environment is neither installed
+    # nor listed
+    assert not any("colorama" in line for line in lines)
 
 
 # -- vermin output ----------------------------------------------------------------

@@ -36,7 +36,12 @@ _ADHOC_PACKAGES: Mapping[str, str] = {
     "jwt": "PyJWT",
     "attr": "attrs",
     "markdown_it": "markdown-it-py",
+    "google.protobuf": "protobuf",
 }
+
+# top-level names that are namespaces shared by many distributions: a
+# dotted import under them is mapped by `IMPORT_NAMES` or not at all
+_NAMESPACE_ONLY = frozenset({"google", "azure"})
 
 # `IMPORT_NAMES` looked up ignoring case; the first entry of a name wins
 _IMPORT_NAMES_LOWER: dict[str, str] = {}
@@ -244,6 +249,11 @@ class Adhoc(Manifest):
             package = mapped_package(key)
             if package:
                 return package
+
+        # the PyPI packages `google` and `azure` are not the namespaces those
+        # imports belong to (a web-search scraper, an empty meta-package)
+        if top in _NAMESPACE_ONLY:
+            return None
 
         # fall back to the import name itself
         return top

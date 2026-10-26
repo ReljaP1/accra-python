@@ -16,6 +16,7 @@ from accra_language import (
     Dependency,
     DockerfileInstruction,
 )
+from packaging.markers import Marker
 from packaging.requirements import InvalidRequirement, Requirement
 from packaging.specifiers import InvalidSpecifier, SpecifierSet
 from packaging.version import InvalidVersion, Version
@@ -617,16 +618,61 @@ def dependency_base_name(dependency: Dependency) -> str:
     return canonical_name(re.split(r"[\[<>=!~;@\s(]", dependency.name, maxsplit=1)[0])
 
 
-def project_dependencies(
-    dependencies: set[Dependency], cwd: Path | None
+def _marker_of(dependency: Dependency) -> str:
+    """The environment marker of a dependency (`; python_version < "3.8"`),
+    empty when it has none."""
+    return dependency.version.partition(";")[2].strip()
+
+
+def _marker_applies(marker: str, python_version: str) -> bool:
+    """Whether the environment marker holds for `python_version`; a marker that
+    cannot be read counts as holding."""
+    parts = python_version.split(".")
+    environment = {
+        "python_version": ".".join(parts[:2]),
+        "python_full_version": ".".join((parts + ["0", "0"])[:3]),
+    }
+    try:
+        return Marker(marker).evaluate(environment)
+    except Exception:  # noqa: BLE001
+        return True
+
+
+def without_inapplicable(
+    dependencies: set[Dependency], python_version: str | None
 ) -> set[Dependency]:
-    """`dependencies` without the project itself and without redundant bare names.
+    """`dependencies` without the packages whose every environment marker is
+    false for `python_version` (a package that is also listed without a marker,
+    or whose marker cannot be read, stays). Without a version nothing is
+    dropped."""
+    if not python_version:
+        return dependencies
+    names_with_marker: dict[str, list[bool]] = {}
+    for dependency in dependencies:
+        marker = _marker_of(dependency)
+        applies = _marker_applies(marker, python_version) if marker else True
+        names_with_marker.setdefault(dependency_base_name(dependency), []).append(
+            applies
+        )
+    dropped = {name for name, applies in names_with_marker.items() if not any(applies)}
+    return {d for d in dependencies if dependency_base_name(d) not in dropped}
+
+
+def project_dependencies(
+    dependencies: set[Dependency],
+    cwd: Path | None,
+    python_version: str | None = None,
+) -> set[Dependency]:
+    """`dependencies` without the project itself, without redundant bare names
+    and, given `python_version`, without the packages whose environment markers
+    are all false for it (`without_inapplicable`).
 
     Imports of the project's own modules and packages, and its own distribution
     name, are not dependencies: installing them would pull an unrelated package
     of the same name from the index (or fail as a self-dependency). A bare name
     (e.g. from an import) adds nothing when a manifest declares the same package
-    with a version constraint."""
+    with an unconditional version constraint; a conditional one (an environment
+    marker) leaves it."""
     own_names: set[str] = project_own_names(cwd)
     dependencies = {
         dependency
@@ -634,11 +680,12 @@ def project_dependencies(
         if dependency_base_name(dependency) not in own_names
         and not dependency.name.lstrip().startswith("-")
     }
+    dependencies = without_inapplicable(dependencies, python_version)
 
     constrained: set[str] = {
         dependency_base_name(dependency)
         for dependency in dependencies
-        if dependency.version
+        if dependency.version and not _marker_of(dependency)
     }
     return {
         dependency

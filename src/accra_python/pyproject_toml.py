@@ -1,3 +1,4 @@
+import re
 import tomllib
 from pathlib import Path
 from typing import Any, override
@@ -54,6 +55,10 @@ class Pyproject_toml(Manifest):
             # PEP 621 dependencies are PEP 508 strings: keep the specifier
             # (with its operator) and any marker
             dependency = utils.requirement_dependency(dep)
+            if dependency is None:
+                # not PEP 508 (e.g. an unreadable marker): the name still counts
+                pkg = re.split(r"[<>=~!;]", str(dep))[0].strip()
+                dependency = Dependency(name=pkg, version="") if pkg else None
             if dependency is not None:
                 result.add(dependency)
 

@@ -118,13 +118,16 @@ class Venv(PythonEnvironment, EnvironmentManager):
 
     @override
     def _get_dependencies(self) -> set[Dependency] | None:
-        """The manifests' dependencies, without the project itself
+        """The manifests' dependencies, without the project itself and the
+        packages whose environment markers are false for the selected version
         (`utils.project_dependencies`)."""
         dependencies: set[Dependency] | None = super()._get_dependencies()
         if dependencies is None:
             return None
 
-        return utils.project_dependencies(dependencies, self.spec.config.cwd)
+        return utils.project_dependencies(
+            dependencies, self.spec.config.cwd, self.selected_language_version
+        )
 
     @override
     def _install_dependency(self, dependency: Dependency) -> AccraResult:

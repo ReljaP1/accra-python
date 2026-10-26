@@ -55,7 +55,7 @@ class Setup_cfg(Manifest):
                 continue
             dependency = utils.requirement_dependency(dep)
             if dependency is None:
-                pkg = re.split(r"[<>=~!]", dep)[0].strip()
+                pkg = re.split(r"[<>=~!;]", dep)[0].strip()
                 dependency = Dependency(name=pkg, version="") if pkg else None
             if dependency is not None and not dependency.name.startswith("-"):
                 dependencies.add(dependency)

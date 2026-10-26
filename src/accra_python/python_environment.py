@@ -22,7 +22,7 @@ from accra_language import (
 )
 
 from . import utils
-from .import_names import IMPORT_NAMES
+from .import_names import INSTALL_TO_IMPORT
 from .sources import is_main_file, python_sources
 
 # Directories that never hold the project's own entry points.
@@ -45,11 +45,6 @@ _DIRECT_SPEC_RE = re.compile(r"^(?:(?:git|hg|svn|bzr)\+|https?://|file:)")
 # installed also imports
 _IMPORT_CHECK_TIMEOUT = 60.0
 
-# install name (canonical) -> import name; the first entry of a name wins
-_INSTALL_TO_IMPORT: dict[str, str] = {}
-for _import, _install in IMPORT_NAMES.items():
-    _INSTALL_TO_IMPORT.setdefault(utils.canonical_name(_install), _import)
-
 # directory names that are never the project's primary package
 _NOT_PRIMARY_NAMES = frozenset(
     {"tests", "test", "docs", "doc", "documentation", "examples", "example"}
@@ -61,9 +56,9 @@ _NOT_IMPORT_NAMES = {"__pycache__", "bin", "scripts", "include", "share"}
 
 def import_name_for(package: str) -> str | None:
     """The import name of an installable package, from
-    `import_names.IMPORT_NAMES` reversed, None when the mapping does not know
-    it."""
-    return _INSTALL_TO_IMPORT.get(utils.canonical_name(package))
+    `import_names.INSTALL_TO_IMPORT`, None when the mapping does not know it
+    (or the package imports under its own name)."""
+    return INSTALL_TO_IMPORT.get(utils.canonical_name(package))
 
 
 def is_location_spec(spec: str) -> bool:
