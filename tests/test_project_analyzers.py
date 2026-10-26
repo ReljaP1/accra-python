@@ -19,7 +19,10 @@ def _analyze(tmp_path, metric):
     python3 = Python3(Config(cwd=tmp_path, language_version="3.11"))
     assert python3.detect() is True
     results = python3.analyze_project({metric})
-    [(name, profiles)] = results.items()
+    [(name, by_entry)] = results.items()
+    # a whole-project measure is keyed by None
+    [(key, profiles)] = by_entry.items()
+    assert key is None
     assert not isinstance(profiles, accra_language.AccraError), profiles.message
     [profile] = profiles
     return name, profile

@@ -6,7 +6,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
-from accra_language import Config
+from accra_language import AccraInstallError, AccraResult, Config
 
 from accra_python import Python3, Uv, utils
 
@@ -30,11 +30,10 @@ def test_setup_py_project_is_installed_editable(tmp_path):
     _write(tmp_path, {"setup.py": SETUP_PY, "demo_setup/__init__.py": "VALUE = 7\n"})
     _venv(tmp_path)
     uv = Uv(Config(cwd=tmp_path))
-    assert uv.has_project_install() is True
 
-    result = uv.install_project()
+    result = uv.post_dependencies_installation()
 
-    assert result.success, [e.message for e in result.errors]
+    assert result.success and not result.errors, [e.message for e in result.errors]
     assert result.dockerfile.post_dependencies_installation == [
         "RUN python -m pip install --no-cache-dir ."
     ]
@@ -54,35 +53,161 @@ def test_setup_py_project_is_installed_editable(tmp_path):
     assert "demo-setup" in uv._editable_names()
 
 
-def test_project_without_install_step_runs_from_source(tmp_path):
-    _write(
-        tmp_path, {"main.py": "print(1)\n", "tools/run.py": "", "pkg/__init__.py": ""}
-    )
-    uv = Uv(Config(cwd=tmp_path, image_workdir="/srv/app"))
-    assert uv.has_project_install() is False
-
-    result = uv.install_project()
-
-    assert result.success
-    assert result.dockerfile.post_dependencies_installation == [
-        "ENV PYTHONPATH=/srv/app:/srv/app/tools"
-    ]
-
-
 @pytest.mark.integration
 def test_failing_project_install_falls_back_to_source(tmp_path):
     _write(tmp_path, {"setup.py": "raise SystemExit('broken setup')\n", "lib.py": ""})
     _venv(tmp_path)
     uv = Uv(Config(cwd=tmp_path))
 
-    result = uv.install_project()
+    result = uv.post_dependencies_installation()
 
-    assert not result.success
-    assert "pip could not install the project" in result.errors[-1].message
-    assert (
-        result.dockerfile.post_dependencies_installation[-1]
-        == "ENV PYTHONPATH=/project"
+    # lib imports from source: the project is usable, nothing to report
+    assert result.success and not result.errors
+    assert result.dockerfile.post_dependencies_installation == [
+        "ENV PYTHONPATH=/project"
+    ]
+
+
+# -- the project's install is the post step: no error means initialised --------------------------------
+
+
+def _post_step(tmp_path, monkeypatch, files, *, pip_works, importable):
+    """The post step with pip and the import check stubbed: `pip_works` for
+    `pip install`, `importable` the names that import."""
+    _write(tmp_path, files)
+    uv = Uv(Config(cwd=tmp_path, image_workdir="/srv/app"))
+    monkeypatch.setattr(
+        Uv, "_install_dependency", lambda self, dependency: AccraResult()
     )
+
+    def run(command, config, timeout=None, **kwargs):
+        return subprocess.CompletedProcess(command, 0 if pip_works else 1, "", "boom")
+
+    monkeypatch.setattr(utils, "run", run)
+    monkeypatch.setattr(
+        Uv,
+        "_is_importable",
+        lambda self, dependency, extra=(): dependency.name in importable,
+    )
+    return uv.post_dependencies_installation()
+
+
+SETUP = {"setup.py": "from setuptools import setup\nsetup(name='demo')\n"}
+
+
+def test_project_without_install_step_runs_from_source(tmp_path, monkeypatch):
+    result = _post_step(
+        tmp_path,
+        monkeypatch,
+        {"main.py": "print(1)\n", "tools/run.py": "", "pkg/__init__.py": ""},
+        pip_works=True,
+        importable={"main", "pkg"},
+    )
+
+    assert result.success and not result.errors
+    assert result.dockerfile.post_dependencies_installation == [
+        "ENV PYTHONPATH=/srv/app:/srv/app/tools"
+    ]
+
+
+def test_a_project_with_nothing_importable_is_reported_but_builds(
+    tmp_path, monkeypatch
+):
+    result = _post_step(
+        tmp_path,
+        monkeypatch,
+        {"main.py": "print(1)\n"},
+        pip_works=True,
+        importable=set(),
+    )
+
+    # Python runs from source: never a failed build, the error says why
+    assert result.success
+    [error] = result.errors
+    assert isinstance(error, AccraInstallError)
+    assert "not usable" in error.message
+
+
+def test_an_installed_project_that_imports_has_no_error(tmp_path, monkeypatch):
+    result = _post_step(
+        tmp_path,
+        monkeypatch,
+        {**SETUP, "demo/__init__.py": ""},
+        pip_works=True,
+        importable={"demo"},
+    )
+
+    assert result.success and not result.errors
+    assert result.dockerfile.post_dependencies_installation == [
+        "RUN python -m pip install --no-cache-dir ."
+    ]
+
+
+def test_an_installed_project_whose_package_does_not_import_is_reported(
+    tmp_path, monkeypatch
+):
+    result = _post_step(
+        tmp_path,
+        monkeypatch,
+        {**SETUP, "demo/__init__.py": ""},
+        pip_works=True,
+        importable=set(),
+    )
+
+    assert result.success and len(result.errors) == 1
+
+
+def test_a_failed_install_with_a_package_that_imports_is_source_mode(
+    tmp_path, monkeypatch
+):
+    result = _post_step(
+        tmp_path,
+        monkeypatch,
+        {**SETUP, "demo/__init__.py": ""},
+        pip_works=False,
+        importable={"demo"},
+    )
+
+    assert result.success and not result.errors
+    assert result.dockerfile.post_dependencies_installation == [
+        "ENV PYTHONPATH=/srv/app"
+    ]
+
+
+def test_a_failed_install_with_no_primary_package_is_source_mode(tmp_path, monkeypatch):
+    # nothing but tests and docs to import: as on main, source mode, no error
+    result = _post_step(
+        tmp_path,
+        monkeypatch,
+        {
+            "setup.py": "from setuptools import setup\nsetup()\n",
+            "tests/__init__.py": "",
+            "docs/conf.py": "",
+        },
+        pip_works=False,
+        importable=set(),
+    )
+
+    assert result.success and not result.errors
+    assert result.dockerfile.post_dependencies_installation[-1].startswith(
+        "ENV PYTHONPATH="
+    )
+
+
+def test_a_failed_install_that_leaves_nothing_importable_is_reported(
+    tmp_path, monkeypatch
+):
+    result = _post_step(
+        tmp_path,
+        monkeypatch,
+        {**SETUP, "demo/__init__.py": ""},
+        pip_works=False,
+        importable=set(),
+    )
+
+    assert result.success
+    [error] = result.errors
+    assert "could not install the project" in error.message
 
 
 def test_run_environment_puts_the_import_roots_first(tmp_path):

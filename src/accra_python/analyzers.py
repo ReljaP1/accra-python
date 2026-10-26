@@ -1,23 +1,34 @@
 """Profilers as accra-language analyzers: memray (memory) and scalene
-(CPU/GPU load)."""
+(CPU/GPU load).
+
+A profiler is never installed into the project's environment: it goes, once per
+Python version and platform, into a directory of its own outside the project,
+and a run reaches it through a `sitecustomize` that appends that directory to
+`sys.path` after the environment's site-packages, so the project's own packages
+always win and its package list stays as it was."""
 
 import json
 import os
 import platform
 import re
+import shutil
+import subprocess
 import tempfile
 import time
+from abc import abstractmethod
 from pathlib import Path
 from typing import override
 
 from accra_language import (
     AccraAnalysisError,
+    AccraError,
     AccraInstallError,
     AccraNoSamplesError,
+    AnalysisResults,
+    AnalysisRun,
     Analyzer,
     AnalyzerSpec,
     Config,
-    Dependency,
     EnvironmentManager,
     LoadProfile,
     MemoryProfile,
@@ -53,16 +64,148 @@ def _target(entry_point) -> list[str]:
     return command
 
 
-def _install(
-    env_manager: EnvironmentManager, *packages: str
-) -> AccraInstallError | None:
-    """Installs `packages` in order; the first failure's error, else None."""
-    for package in packages:
-        result = env_manager._install_dependency(Dependency(name=package, version=""))
-        if result.errors:
-            error = result.errors[0]
-            return AccraInstallError(message=error.message)
-    return None
+# put on PYTHONPATH of a run: appends the tools directory (the environment
+# variable below) to sys.path once site-packages is on it, then lets the
+# project's own sitecustomize, if it has one, run as it would have
+_LOADER = """\
+import os
+import sys
+
+_tools = os.environ.get("ACCRA_PYTHON_TOOLS")
+if _tools and _tools not in sys.path:
+    sys.path.append(_tools)
+
+_here = os.path.dirname(os.path.abspath(__file__))
+_own = sys.modules.pop("sitecustomize", None)
+_path = sys.path[:]
+sys.path[:] = [p for p in sys.path if os.path.abspath(p or ".") != _here]
+try:
+    import sitecustomize  # noqa: F401
+except ModuleNotFoundError as _exc:
+    if _exc.name != "sitecustomize":
+        raise
+    if _own is not None:
+        sys.modules["sitecustomize"] = _own
+finally:
+    sys.path[:] = _path
+"""
+
+
+def _cache_root() -> Path:
+    """Where the profilers live: the user's cache directory, else a temporary
+    one."""
+    base = os.environ.get("XDG_CACHE_HOME") or str(Path.home() / ".cache")
+    for root in (Path(base), Path(tempfile.gettempdir())):
+        try:
+            directory = root / "accra-python" / "tools"
+            directory.mkdir(parents=True, exist_ok=True)
+            if os.access(directory, os.W_OK):
+                return directory
+        except OSError:
+            continue
+    return Path(tempfile.mkdtemp())
+
+
+def _interpreter_key(python: str, config: Config, timeout) -> str | None:
+    """`cp311-linux-x86_64`: what a compiled profiler is built for."""
+    probed = utils.run(
+        [
+            python,
+            "-c",
+            "import sys, sysconfig;"
+            "print('cp%d%d-%s' % (*sys.version_info[:2], sysconfig.get_platform()))",
+        ],
+        config,
+        timeout,
+    )
+    key = (probed.stdout or "").strip()
+    return (
+        re.sub(r"[^A-Za-z0-9_.-]", "_", key) or None if probed.returncode == 0 else None
+    )
+
+
+class _Tools:
+    """A profiler's installation: its packages directory and the loader."""
+
+    def __init__(self, packages: Path, loader: Path):
+        self.packages = packages
+        self.loader = loader
+
+    def environment(self, env: dict[str, str]) -> dict[str, str]:
+        """`env` with the loader first on PYTHONPATH and the packages named."""
+        env = dict(env)
+        existing = env.get("PYTHONPATH")
+        env["PYTHONPATH"] = os.pathsep.join(
+            [str(self.loader), *([existing] if existing else [])]
+        )
+        env["ACCRA_PYTHON_TOOLS"] = str(self.packages)
+        return env
+
+
+def _install_tools(
+    name: str, packages: tuple[str, ...], env_manager: EnvironmentManager
+) -> _Tools | AccraInstallError:
+    """The profiler `packages` for the environment's Python, installed once
+    outside the project (`uv pip install --target`, whose resolution ignores
+    what the project has installed)."""
+    config: Config = env_manager.spec.config
+    python = str(env_manager.environment_path() / "bin" / "python")
+    timeout = utils.call_timeout(env_manager)
+    try:
+        key = _interpreter_key(python, config, timeout)
+    except (subprocess.SubprocessError, OSError) as exc:
+        return AccraInstallError(
+            message=f"could not run the environment's Python: {exc}"
+        )
+    if key is None:
+        return AccraInstallError(message="could not read the environment's Python")
+    root = _cache_root() / key / name
+    packages_dir = root / "packages"
+    loader_dir = root / "loader"
+    done = root / ".installed"
+    wanted = " ".join(packages)
+    if done.is_file() and done.read_text(encoding="utf-8") == wanted:
+        return _Tools(packages_dir, loader_dir)
+
+    # built beside the final place and moved into it, so that concurrent runs
+    # never see a half-installed directory
+    root.parent.mkdir(parents=True, exist_ok=True)
+    staging = Path(tempfile.mkdtemp(prefix=f".{name}-", dir=root.parent))
+    try:
+        installed = utils.run(
+            [
+                "uv",
+                "pip",
+                "install",
+                "--python",
+                python,
+                "--target",
+                str(staging / "packages"),
+                *packages,
+            ],
+            config,
+            timeout,
+            extra_env=utils.uv_timeout_env(config),
+        )
+        if installed.returncode != 0:
+            return utils.failure_error(
+                AccraInstallError, f"could not install {name}", installed
+            )
+        (staging / "loader").mkdir()
+        (staging / "loader" / "sitecustomize.py").write_text(_LOADER, encoding="utf-8")
+        (staging / ".installed").write_text(wanted, encoding="utf-8")
+        # another run may have installed it meanwhile: keep that one
+        if not (done.is_file() and done.read_text(encoding="utf-8") == wanted):
+            shutil.rmtree(root, ignore_errors=True)
+            try:
+                staging.rename(root)
+            except OSError:
+                return AccraInstallError(message=f"could not install {name}")
+    except (subprocess.SubprocessError, OSError) as exc:
+        return AccraInstallError(message=f"could not install {name}: {exc}")
+    finally:
+        shutil.rmtree(staging, ignore_errors=True)
+    return _Tools(packages_dir, loader_dir)
 
 
 def _report_path(entry_point, output_dir: Path | None, suffix: str) -> Path:
@@ -75,24 +218,62 @@ def _report_path(entry_point, output_dir: Path | None, suffix: str) -> Path:
 
 
 class _ProfilerAnalyzer(Analyzer):
-    def _run(
-        self,
-        command,
-        entry_point,
-        env_manager: EnvironmentManager,
-        env=None,
-        timeout=None,
-    ):
+    """Runs a profiler over each run it is given, from its own installation."""
+
+    _PACKAGES: tuple[str, ...] = ()
+
+    def __init__(self, spec: AnalyzerSpec):
+        super().__init__(spec)
+        # the install error of an interpreter key that failed, not retried
+        self._failed: dict[str, AccraInstallError] = {}
+
+    def _unsupported(self) -> AccraInstallError | None:
+        return None
+
+    def _tools(self, env_manager: EnvironmentManager) -> _Tools | AccraInstallError:
+        unsupported = self._unsupported()
+        if unsupported is not None:
+            return unsupported
+        python = str(env_manager.environment_path() / "bin" / "python")
+        if python in self._failed:
+            return self._failed[python]
+        tools = _install_tools(self.spec.name, self._PACKAGES, env_manager)
+        if isinstance(tools, AccraInstallError):
+            self._failed[python] = tools
+        return tools
+
+    @override
+    def analyze_project(
+        self, env_manager: EnvironmentManager, runs=()
+    ) -> AnalysisResults:
+        if not runs:
+            return {}
+        tools = self._tools(env_manager)
+        results: AnalysisResults = {}
+        for run in runs:
+            if isinstance(tools, AccraError):
+                results[run.entry_point] = AccraAnalysisError(message=tools.message)
+            else:
+                results[run.entry_point] = self._measure(run, env_manager, tools)
+        return results
+
+    @abstractmethod
+    def _measure(self, run: AnalysisRun, env_manager: EnvironmentManager, tools):
+        """The profiles of one run, or its error."""
+        ...
+
+    def _run(self, command, run: AnalysisRun, env_manager, tools: _Tools):
         config: Config = self.spec.config
+        env = run.env
         if env is None:
             base_env = dict(config.env) if config.env is not None else dict(os.environ)
             env = env_manager.run_environment(base_env)
         return utils.run(
             command,
             config,
-            timeout if timeout is not None else utils.call_timeout(env_manager),
-            cwd=entry_point.cwd or config.cwd,
-            env=dict(env),
+            run.timeout if run.timeout is not None else utils.call_timeout(env_manager),
+            cwd=run.entry_point.cwd or config.cwd,
+            env=tools.environment(dict(env)),
         )
 
     def _python(self, env_manager: EnvironmentManager) -> str:
@@ -107,17 +288,14 @@ class Memray(_ProfilerAnalyzer):
             AnalyzerSpec(name="memray", config=config, metrics={Metrics.MEMORY})
         )
 
-    @override
-    def install(self, env_manager: EnvironmentManager) -> AccraInstallError | None:
-        # memray's report templates need jinja2 and markupsafe, installed first
-        return _install(env_manager, "jinja2", "markupsafe", "memray")
+    # memray's report templates need jinja2 and markupsafe
+    _PACKAGES = ("jinja2", "markupsafe", "memray")
 
     @override
-    def analyze(
-        self, entry_point, args, env_manager, *, env=None, timeout=None, output_dir=None
-    ):
+    def _measure(self, run, env_manager, tools):
+        entry_point, args = run.entry_point, run.args
         python = self._python(env_manager)
-        output = _report_path(entry_point, output_dir, ".bin")
+        output = _report_path(entry_point, run.output_dir, ".bin")
         output.unlink(missing_ok=True)
         started = time.monotonic()
         ran = self._run(
@@ -131,10 +309,9 @@ class Memray(_ProfilerAnalyzer):
                 *_target(entry_point),
                 *args,
             ],
-            entry_point,
+            run,
             env_manager,
-            env,
-            timeout,
+            tools,
         )
         duration_ms = int((time.monotonic() - started) * 1000)
         if ran.returncode != 0:
@@ -144,10 +321,9 @@ class Memray(_ProfilerAnalyzer):
 
         stats = self._run(
             [python, "-m", "memray", "stats", str(output)],
-            entry_point,
+            run,
             env_manager,
-            env,
-            timeout,
+            tools,
         )
         if stats.returncode != 0:
             return utils.failure_error(AccraAnalysisError, "memray stats failed", stats)
@@ -175,17 +351,18 @@ class Scalene(_ProfilerAnalyzer):
             AnalyzerSpec(name="scalene", config=config, metrics={Metrics.LOAD})
         )
 
-    @override
-    def install(self, env_manager: EnvironmentManager) -> AccraInstallError | None:
-        if platform.system() not in {"Linux", "Darwin"}:
-            return AccraInstallError(message="scalene runs on Linux and macOS only")
-        return _install(env_manager, "scalene", "jinja2", "markupsafe")
+    _PACKAGES = ("scalene", "jinja2", "markupsafe")
 
     @override
-    def analyze(
-        self, entry_point, args, env_manager, *, env=None, timeout=None, output_dir=None
-    ):
-        output = _report_path(entry_point, output_dir, ".scalene.json")
+    def _unsupported(self):
+        if platform.system() not in {"Linux", "Darwin"}:
+            return AccraInstallError(message="scalene runs on Linux and macOS only")
+        return None
+
+    @override
+    def _measure(self, run, env_manager, tools):
+        entry_point, args = run.entry_point, run.args
+        output = _report_path(entry_point, run.output_dir, ".scalene.json")
         output.unlink(missing_ok=True)
         started = time.monotonic()
         ran = self._run(
@@ -199,10 +376,9 @@ class Scalene(_ProfilerAnalyzer):
                 *_target(entry_point),
                 *args,
             ],
-            entry_point,
+            run,
             env_manager,
-            env,
-            timeout,
+            tools,
         )
         duration_ms = int((time.monotonic() - started) * 1000)
         # a failing script still leaves a report worth reading; without one

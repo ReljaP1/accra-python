@@ -48,6 +48,8 @@ def test_adhoc_package_resolution(tmp_path):
                     *docker_activate_environment(".venv"),
                 ],
                 dependencies_installation=[f"RUN uv pip install PyYAML=={pyyaml}"],
+                # no install step: the project runs from source
+                post_dependencies_installation=["ENV PYTHONPATH=/project"],
             )
         )
 

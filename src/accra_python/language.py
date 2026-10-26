@@ -100,8 +100,12 @@ _TOOLCHAIN = {
 def _analyzers(config: Config) -> dict:
     """memray and scalene, and the static network and parallelism analyses."""
     return {
-        "analyzers": {Memray(config), Scalene(config)},
-        "project_analyzers": {Network(config), Parallelism(config)},
+        "analyzers": {
+            Memray(config),
+            Scalene(config),
+            Network(config),
+            Parallelism(config),
+        }
     }
 
 

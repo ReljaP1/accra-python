@@ -80,8 +80,8 @@ def test_poetry_only_project_gets_its_dependencies_and_is_installed(tmp_path):
         line.startswith("RUN uv pip install six==")
         for line in built.dockerfile.dependencies_installation
     )
-    installed = python3.install_project()
-    assert installed.success, [e.message for e in installed.errors]
+    # the project's own install is part of the build
+    assert not built.errors, [e.message for e in built.errors]
     imported = subprocess.run(
         [
             str(tmp_path / ".venv/bin/python"),
@@ -119,11 +119,11 @@ def test_a_failing_project_install_is_not_a_build_failure(tmp_path):
     built = python3.build()
     assert built.success, [e.message for e in built.errors]
 
-    installed = python3.install_project()
-    assert not installed.success
+    # the install failed, the package imports from source: no error
+    assert not built.errors, [e.message for e in built.errors]
     assert any(
         "PYTHONPATH" in str(line)
-        for line in installed.dockerfile.post_dependencies_installation
+        for line in built.dockerfile.post_dependencies_installation
     )
 
 
@@ -269,7 +269,7 @@ def test_an_install_that_does_not_import_is_a_failed_dependency(tmp_path, monkey
     monkeypatch.setattr(utils, "run", _fake_run([]))
     for manager in (Uv, Venv):
         env_manager = manager(Config(cwd=tmp_path))
-        monkeypatch.setattr(env_manager, "is_usable", lambda dependency: False)
+        monkeypatch.setattr(env_manager, "_is_importable", lambda dependency: False)
         monkeypatch.setattr(env_manager, "installed_version", lambda d: "1.16.0")
 
         result = env_manager._install_dependency(Dependency(name="six", version=""))
@@ -284,7 +284,7 @@ def test_an_install_that_imports_is_not_an_error(tmp_path, monkeypatch):
     monkeypatch.setattr(PythonEnvironment, "already_importable", lambda *_: False)
     monkeypatch.setattr(utils, "run", _fake_run([]))
     uv = Uv(Config(cwd=tmp_path))
-    monkeypatch.setattr(uv, "is_usable", lambda dependency: True)
+    monkeypatch.setattr(uv, "_is_importable", lambda dependency: True)
 
     assert not uv._install_dependency(Dependency(name="six", version="")).errors
 
@@ -292,7 +292,7 @@ def test_an_install_that_imports_is_not_an_error(tmp_path, monkeypatch):
 def test_a_location_spec_is_not_import_checked(tmp_path, monkeypatch):
     monkeypatch.setattr(utils, "run", _fake_run([]))
     uv = Uv(Config(cwd=tmp_path))
-    monkeypatch.setattr(uv, "is_usable", lambda dependency: False)
+    monkeypatch.setattr(uv, "_is_importable", lambda dependency: False)
 
     spec = "git+https://github.com/example/pkg"
     assert not uv._install_dependency(Dependency(name=spec, version="")).errors
@@ -341,7 +341,7 @@ def test_the_dockerfile_line_pins_the_installed_version(tmp_path, monkeypatch):
     monkeypatch.setattr(utils, "run", _fake_run([]))
     uv = Uv(Config(cwd=tmp_path))
     monkeypatch.setattr(uv, "installed_version", lambda dependency: "1.16.0")
-    monkeypatch.setattr(uv, "is_usable", lambda dependency: True)
+    monkeypatch.setattr(uv, "_is_importable", lambda dependency: True)
 
     result = uv._install_dependency(Dependency(name="six", version=">=1.0"))
     extras = uv._install_dependency(
@@ -359,7 +359,7 @@ def test_the_dockerfile_line_pins_the_installed_version(tmp_path, monkeypatch):
 def test_a_location_spec_stays_as_written_in_the_dockerfile(tmp_path, monkeypatch):
     monkeypatch.setattr(utils, "run", _fake_run([], lambda c: (0, "9.9\n")))
     uv = Uv(Config(cwd=tmp_path))
-    monkeypatch.setattr(uv, "is_usable", lambda dependency: True)
+    monkeypatch.setattr(uv, "_is_importable", lambda dependency: True)
     spec = "git+https://github.com/example/pkg"
 
     result = uv._install_dependency(Dependency(name=spec, version=""))

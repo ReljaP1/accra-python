@@ -125,8 +125,10 @@ def test_installed_usable_and_uninstall_in_a_real_venv(tmp_path):
     installed = uv.installed_dependencies()
     assert not isinstance(installed, AccraError)
     assert any(d.name == "six" and d.version.startswith("==") for d in installed)
-    assert uv.is_usable(Dependency(name="six", version="")) is True
-    assert uv.is_usable(Dependency(name="no-such-module-accra", version="")) is False
+    assert uv._is_importable(Dependency(name="six", version="")) is True
+    assert (
+        uv._is_importable(Dependency(name="no-such-module-accra", version="")) is False
+    )
 
     assert uv.uninstall_dependencies([Dependency(name="six", version="")]).success
-    assert uv.is_usable(Dependency(name="six", version="")) is False
+    assert uv._is_importable(Dependency(name="six", version="")) is False

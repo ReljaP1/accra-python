@@ -48,12 +48,15 @@ def test_uv(tmp_path):
                     f"RUN uv venv --seed --python {version}",
                     *docker_activate_environment(".venv"),
                 ],
-                # the project is not installed by the build;
                 # each dependency is pinned to its installed version
                 dependencies_installation=[
                     f"RUN uv pip install httpx=={pinned['httpx']}",
                     f"RUN uv pip install pydantic=={pinned['pydantic']}",
                     f"RUN uv pip install rich=={pinned['rich']}",
+                ],
+                # then the project itself
+                post_dependencies_installation=[
+                    "RUN python -m pip install --no-cache-dir ."
                 ],
             )
         )

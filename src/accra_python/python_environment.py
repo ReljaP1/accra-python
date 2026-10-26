@@ -17,7 +17,6 @@ from accra_language import (
     AccraResult,
     AccraRunError,
     Dependency,
-    Dockerfile,
     DockerfileInstruction,
     EntryPoint,
 )
@@ -50,6 +49,11 @@ _IMPORT_CHECK_TIMEOUT = 60.0
 _INSTALL_TO_IMPORT: dict[str, str] = {}
 for _import, _install in IMPORT_NAMES.items():
     _INSTALL_TO_IMPORT.setdefault(utils.canonical_name(_install), _import)
+
+# directory names that are never the project's primary package
+_NOT_PRIMARY_NAMES = frozenset(
+    {"tests", "test", "docs", "doc", "documentation", "examples", "example"}
+)
 
 _EXTENSION_SUFFIXES = (".so", ".pyd")
 _NOT_IMPORT_NAMES = {"__pycache__", "bin", "scripts", "include", "share"}
@@ -265,7 +269,7 @@ class PythonEnvironment:
         try:
             if self.installed_version(dependency) is None:
                 return None
-            usable = self.is_usable(dependency)
+            usable = self._is_importable(dependency)
         except (subprocess.SubprocessError, OSError):
             return None
         if usable is not False:
@@ -349,7 +353,7 @@ class PythonEnvironment:
         pythonpath = ":".join(workdir if r == "." else f"{workdir}/{r}" for r in roots)
         return [DockerfileInstruction(f"ENV PYTHONPATH={pythonpath}")]
 
-    def has_project_install(self) -> bool:
+    def _has_project_install(self) -> bool:
         """A `pyproject.toml`, `setup.py` or `setup.cfg`."""
         project = self._project()
         return any(
@@ -357,59 +361,104 @@ class PythonEnvironment:
             for name in ("pyproject.toml", "setup.py", "setup.cfg")
         )
 
-    def install_project(self) -> AccraResult:
-        """Installs the project: after `setuptools`, `pip install -e <project>`, else `pip install <project>`.
-        A project without `pyproject.toml`, `setup.py` or `setup.cfg` (or whose
-        install fails) runs from source, so its Dockerfile puts the import roots
-        on PYTHONPATH."""
-        project = self._project()
-        if not self.has_project_install():
-            return AccraResult(
-                dockerfile=Dockerfile(
-                    post_dependencies_installation=self._source_mode_lines()
+    def _primary_candidates(self) -> list[str]:
+        """The project's own names that can be its primary package: never its
+        tests, documentation or examples."""
+        return sorted(
+            name
+            for name in self.project_names()
+            if utils.canonical_name(name) not in _NOT_PRIMARY_NAMES
+        )
+
+    def _project_imports(self, candidates: Iterable[str]) -> bool:
+        """Whether one of the primary candidates imports in the environment."""
+        return any(
+            self._is_importable(Dependency(name=name, version="")) is True
+            for name in candidates
+        )
+
+    def post_dependencies_installation(self) -> AccraResult:
+        """Installs the project: after `setuptools`, `pip install -e <project>`,
+        else `pip install <project>`. A project without `pyproject.toml`,
+        `setup.py` or `setup.cfg` (or whose install fails) runs from source, so
+        its Dockerfile puts the import roots on PYTHONPATH.
+
+        Python runs from source, so this never fails the build: an error is
+        recorded only when the project ended up unusable, that is when none of
+        its primary packages imports (an install that failed but left no
+        primary package, or a project with nothing to import, is source mode,
+        not an error). No error means the project is initialised."""
+        # the user and `chown` are the composing caller's
+        has_install = self._has_project_install()
+        candidates = self._primary_candidates()
+        result = AccraResult()
+        failure: AccraError | None = None
+        installed = False
+
+        if has_install:
+            # setuptools is a helper: its failure is not the project's
+            try:
+                setup = self._install_dependency(
+                    Dependency(name="setuptools", version="")
                 )
+            except (subprocess.SubprocessError, OSError):
+                setup = AccraResult()
+            result.dockerfile.extend(setup.dockerfile)
+            installed, failure = self._pip_install_project(result)
+        if not installed:
+            result.dockerfile.post_dependencies_installation.extend(
+                self._source_mode_lines()
             )
 
-        try:
-            result = self._install_dependency(Dependency(name="setuptools", version=""))
-        except (subprocess.SubprocessError, OSError):
-            result = AccraResult()
+        if self._project_imports(candidates) or (has_install and not candidates):
+            return result
+        reason = (
+            failure.message
+            if failure is not None
+            else "no primary local package of the project imports"
+        )
+        result.errors.append(
+            AccraInstallError(message=f"the project is not usable: {reason}")
+        )
+        return result
+
+    def _pip_install_project(
+        self, result: AccraResult
+    ) -> tuple[bool, AccraError | None]:
+        """`pip install -e`, else `pip install`, of the project; whether one
+        worked (its Dockerfile line is added to `result`) and, if not, why."""
+        project = self._project()
         env = dict(self.spec.config.env or os.environ)
         timeout = _positive_seconds(env.get("ACCRA_PROJECT_INSTALL_TIMEOUT"))
-        if timeout is None:
-            timeout = utils.call_timeout(self)
+        capped = utils.call_timeout(self)
+        if timeout is None or (capped is not None and capped < timeout):
+            timeout = capped
         options = ["--retries", utils.PIP_RETRIES, "--no-input"]
         python = self._python()
-        installed = None
+        completed = None
         failure: AccraError | None = None
         for command in (
             [python, "-m", "pip", "install", "-e", str(project), *options],
             [python, "-m", "pip", "install", str(project), *options],
         ):
             try:
-                installed = utils.run(command, self.spec.config, timeout)
+                completed = utils.run(command, self.spec.config, timeout)
             except (subprocess.SubprocessError, OSError) as exc:
-                installed = None
+                completed = None
                 failure = AccraInstallError(
                     message=f"pip could not install the project: {exc}"
                 )
                 continue
-            if installed.returncode == 0:
+            if completed.returncode == 0:
                 result.dockerfile.post_dependencies_installation.append(
                     DockerfileInstruction("RUN python -m pip install --no-cache-dir .")
                 )
-                return result
-
-        if installed is not None:
+                return True, None
+        if completed is not None:
             failure = utils.failure_error(
-                AccraInstallError, "pip could not install the project", installed
+                AccraInstallError, "pip could not install the project", completed
             )
-        result.errors.append(failure)
-        result.success = False
-        result.dockerfile.post_dependencies_installation.extend(
-            self._source_mode_lines()
-        )
-        return result
+        return False, failure
 
     def parse_dependency(self, spec: str) -> Dependency | AccraError:
         text = spec.strip()
@@ -466,7 +515,7 @@ class PythonEnvironment:
             base = getattr(self.spec.config, "timeout", None)
         return min(_IMPORT_CHECK_TIMEOUT, base) if base else _IMPORT_CHECK_TIMEOUT
 
-    def is_usable(
+    def _is_importable(
         self, dependency: Dependency, extra_names: Iterable[str] = ()
     ) -> bool | AccraError:
         """Whether one of the dependency's import names imports: the name, its
@@ -514,7 +563,7 @@ class PythonEnvironment:
         base = re.split(r"[\[<>=!~;@\s(]", dependency.name, maxsplit=1)[0]
         mapped = import_name_for(base)
         try:
-            usable = self.is_usable(dependency, [mapped] if mapped else ())
+            usable = self._is_importable(dependency, [mapped] if mapped else ())
         except (subprocess.SubprocessError, OSError):
             return False
         return usable is True

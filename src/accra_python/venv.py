@@ -178,8 +178,3 @@ class Venv(PythonEnvironment, EnvironmentManager):
                 ]
             ),
         )
-
-    @override
-    def post_dependencies_installation(self) -> AccraResult:
-        # the user and `chown` are the composing caller's
-        return AccraResult()

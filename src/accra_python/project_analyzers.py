@@ -13,6 +13,8 @@ from typing import override
 
 from accra_language import (
     AccraAnalysisError,
+    AnalysisResults,
+    Analyzer,
     AnalyzerSpec,
     Config,
     EnvironmentManager,
@@ -22,7 +24,6 @@ from accra_language import (
     NetworkProfile,
     ParallelismProfile,
     ParallelismUsage,
-    ProjectAnalyzer,
 )
 
 from .sources import python_sources
@@ -48,7 +49,7 @@ _NETWORK_CALLS = (
 )
 
 
-class Network(ProjectAnalyzer):
+class Network(Analyzer):
     """Whether the project needs the network: networking packages among its
     dependencies and imports, network calls in its code, web frameworks."""
 
@@ -60,7 +61,12 @@ class Network(ProjectAnalyzer):
         )
 
     @override
-    def analyze_project(self, env_manager: EnvironmentManager):
+    def analyze_project(
+        self, env_manager: EnvironmentManager, runs=()
+    ) -> AnalysisResults:
+        return {None: self._measure(env_manager)}
+
+    def _measure(self, env_manager: EnvironmentManager):
         started = time.monotonic()
         project = Path(self.spec.config.cwd or ".")
         try:
@@ -133,7 +139,7 @@ def _usage(found: dict[str, set[str]]) -> ParallelismUsage:
     )
 
 
-class Parallelism(ProjectAnalyzer):
+class Parallelism(Analyzer):
     """Which files use threading and which multiprocessing libraries (an
     indicator appearing in an imported name, case-insensitively)."""
 
@@ -145,7 +151,12 @@ class Parallelism(ProjectAnalyzer):
         )
 
     @override
-    def analyze_project(self, env_manager: EnvironmentManager):
+    def analyze_project(
+        self, env_manager: EnvironmentManager, runs=()
+    ) -> AnalysisResults:
+        return {None: self._measure(env_manager)}
+
+    def _measure(self, env_manager: EnvironmentManager):
         started = time.monotonic()
         project = Path(self.spec.config.cwd or ".")
         try:

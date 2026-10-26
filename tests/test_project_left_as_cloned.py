@@ -66,16 +66,13 @@ def test_pyproject_project_is_installed_without_writing_into_it(tmp_path):
     result = python3.build()
 
     assert result.success, [e.message for e in result.errors]
-    # the build only creates the venv and installs the dependencies;
-    # install_project() installs the project (pip install -e)
+    # the venv and the dependencies come first, then the project (pip install -e)
     assert "RUN uv pip install ." not in result.dockerfile.pre_dependencies_installation
-    installed = python3.install_project()
-    assert installed.success, [e.message for e in installed.errors]
     assert not (tmp_path / "uv.lock").exists()
     assert not (tmp_path / ".python-version").exists()
     assert (
         "RUN python -m pip install --no-cache-dir ."
-        in installed.dockerfile.post_dependencies_installation
+        in result.dockerfile.post_dependencies_installation
     )
 
     imported = subprocess.run(

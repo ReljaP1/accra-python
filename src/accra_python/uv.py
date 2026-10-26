@@ -128,7 +128,7 @@ class Uv(PythonEnvironment, EnvironmentManager):
 
         # setup uv
         # NOTE the venv only, for every project: its dependencies come from the
-        # dependency step and the project itself from `install_project()`
+        # dependency step and the project itself from `post_dependencies_installation()`
         setup_result: AccraResult = self._venv_setup()
 
         result.extend(setup_result)
@@ -187,8 +187,3 @@ class Uv(PythonEnvironment, EnvironmentManager):
                 ]
             ),
         )
-
-    @override
-    def post_dependencies_installation(self) -> AccraResult:
-        # the user and `chown` are the composing caller's
-        return AccraResult()

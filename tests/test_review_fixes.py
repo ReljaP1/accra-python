@@ -74,7 +74,7 @@ def test_import_names_come_from_the_installed_files(
 
     info = uv._distribution_dir(dist)
     assert uv._distribution_import_names(info) == [module]
-    assert uv.is_usable(Dependency(name=dist, version="")) is True
+    assert uv._is_importable(Dependency(name=dist, version="")) is True
     assert uv.import_check_error(Dependency(name=dist, version="")) is None
 
 
@@ -93,7 +93,7 @@ def test_no_import_name_cannot_be_decided(tmp_path, monkeypatch):
     monkeypatch.setattr(utils, "run", _run_importing(set()))
     dependency = Dependency(name="scripts-only", version="")
 
-    assert isinstance(uv.is_usable(dependency), AccraError)
+    assert isinstance(uv._is_importable(dependency), AccraError)
     assert uv.import_check_error(dependency) is None
 
 
@@ -105,8 +105,8 @@ def test_a_local_module_with_no_distribution_is_tried_from_source(
     uv = Uv(Config(cwd=tmp_path))
     monkeypatch.setattr(utils, "run", _run_importing({"toolbox"}))
 
-    assert uv.is_usable(Dependency(name="toolbox", version="")) is True
-    assert uv.is_usable(Dependency(name="absent", version="")) is False
+    assert uv._is_importable(Dependency(name="toolbox", version="")) is True
+    assert uv._is_importable(Dependency(name="absent", version="")) is False
 
 
 def test_a_distribution_that_is_not_installed_is_not_checked(tmp_path, monkeypatch):
@@ -314,7 +314,7 @@ def test_the_import_check_has_its_own_short_timeout(tmp_path, monkeypatch):
     monkeypatch.setattr(utils, "run", _run_importing({"six"}, calls))
     uv = Uv(Config(cwd=tmp_path, timeout=900))
 
-    uv.is_usable(Dependency(name="six", version=""))
+    uv._is_importable(Dependency(name="six", version=""))
 
     assert calls and all(timeout <= 60 for _, timeout in calls)
 
@@ -341,7 +341,7 @@ def test_project_install_timeouts_fall_back_and_keep_source_mode(tmp_path, monke
 
     monkeypatch.setattr(utils, "run", run)
 
-    ok = uv.install_project()  # `-e` timed out, the plain install worked
+    ok = uv.post_dependencies_installation()  # `-e` timed out, the plain worked
     assert ok.success
     assert any(t is None or t > 0 for _, t in seen)  # bad value: the default
 
@@ -349,8 +349,9 @@ def test_project_install_timeouts_fall_back_and_keep_source_mode(tmp_path, monke
         raise subprocess.TimeoutExpired(command, 1)
 
     monkeypatch.setattr(utils, "run", always)
-    failed = uv.install_project()
-    assert not failed.success and failed.errors
+    failed = uv.post_dependencies_installation()
+    # the project runs from source: the build goes on
+    assert failed.success
     lines = [str(i) for i in failed.dockerfile.post_dependencies_installation]
     assert any(line.startswith("ENV PYTHONPATH=/project") for line in lines)
 

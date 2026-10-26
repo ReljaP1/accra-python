@@ -56,6 +56,10 @@ def test_venv(tmp_path):
                     f"RUN venv/bin/python -m pip install pydantic=={pinned['pydantic']}",
                     f"RUN venv/bin/python -m pip install rich=={pinned['rich']}",
                 ],
+                # then the project itself
+                post_dependencies_installation=[
+                    "RUN python -m pip install --no-cache-dir ."
+                ],
             )
         )
 
