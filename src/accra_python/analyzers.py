@@ -112,8 +112,10 @@ def _interpreter_key(python: str, config: Config, timeout) -> str | None:
         [
             python,
             "-c",
-            "import sys, sysconfig;"
-            "print('cp%d%d-%s' % (*sys.version_info[:2], sysconfig.get_platform()))",
+            (
+                "import sys, sysconfig;"
+                "print('cp%d%d-%s' % (*sys.version_info[:2], sysconfig.get_platform()))"
+            ),
         ],
         config,
         timeout,
