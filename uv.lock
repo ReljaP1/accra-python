@@ -3,19 +3,11 @@ revision = 5
 requires-python = ">=3.12"
 
 [[package]]
-name = "accra-language"
-version = "0.1.0"
-source = { git = "https://github.com/rumenmitov/accra-language#85e4f877c7b200fcd9b72ad7d58950b556e1045e" }
-dependencies = [
-    { name = "pydantic" },
-]
-
-[[package]]
 name = "accra-python"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
-    { name = "accra-language" },
+    { name = "packaging" },
     { name = "vermin" },
 ]
 
@@ -27,7 +19,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "accra-language", git = "https://github.com/rumenmitov/accra-language" },
+    { name = "packaging" },
     { name = "vermin", specifier = ">=1.6.0" },
 ]
 

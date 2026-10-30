@@ -1,41 +1,24 @@
 import shutil
 from pathlib import Path
 
-from accra_language import AccraResult, Config, Dockerfile
+import pytest
+from accra_language import AccraResult, Config, Dependency, Dockerfile
 
 from accra_python import (
-    _DOCKER_CREATE_USER,
-    _DOCKER_SWITCH_USER,
+    DOCKER_NATIVE_PACKAGES,
     Python3,
-    docker_setup_workdir,
+    docker_activate_environment,
+    docker_python_toolchain,
 )
 
 
-def test_uv():
-    correct = AccraResult(
-        dockerfile=Dockerfile(
-            pre_dependencies_installation=[
-                "FROM python:3.14",
-                *docker_setup_workdir("https://fake_repo"),
-                *_DOCKER_CREATE_USER,
-                "RUN curl -LsSf https://astral.sh/uv/install.sh | sh",
-                "RUN uv sync",
-            ],
-            dependencies_installation=[
-                "RUN uv add httpx",
-                "RUN uv add pydantic",
-                "RUN uv add rich",
-            ],
-            post_dependencies_installation=[*_DOCKER_SWITCH_USER],
-        )
-    )
-
+@pytest.mark.integration
+def test_uv(tmp_path):
     py3_sample_project_dir = Path(__file__).resolve().parent / Path(
         "fixtures/py3-sample-project"
     )
-    tmp_dir = Path("/tmp/py3-sample-project")
+    tmp_dir = tmp_path / "py3-sample-project"
 
-    shutil.rmtree(tmp_dir, ignore_errors=True)
     shutil.copytree(py3_sample_project_dir, tmp_dir)
 
     try:
@@ -47,7 +30,36 @@ def test_uv():
         result: AccraResult = python3.build()
         assert result.success
 
-        assert result == correct
+        # requires-python >= 3.14; an installed 3.14 patch is used when there is one
+        version = python3.env_manager.selected_language_version
+        assert version.startswith("3.14")
+        pinned = {
+            name: python3.env_manager.installed_version(
+                Dependency(name=name, version="")
+            )
+            for name in ("httpx", "pydantic", "rich")
+        }
+        assert all(pinned.values())
+        assert result == AccraResult(
+            dockerfile=Dockerfile(
+                pre_dependencies_installation=[
+                    *docker_python_toolchain(version),
+                    DOCKER_NATIVE_PACKAGES,
+                    f"RUN uv venv --seed --python {version}",
+                    *docker_activate_environment(".venv"),
+                ],
+                # each dependency is pinned to its installed version
+                dependencies_installation=[
+                    f"RUN uv pip install httpx=={pinned['httpx']}",
+                    f"RUN uv pip install pydantic=={pinned['pydantic']}",
+                    f"RUN uv pip install rich=={pinned['rich']}",
+                ],
+                # then the project itself
+                post_dependencies_installation=[
+                    "RUN python -m pip install --no-cache-dir ."
+                ],
+            )
+        )
 
     finally:
         shutil.rmtree(tmp_dir)
