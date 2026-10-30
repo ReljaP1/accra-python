@@ -1,4 +1,3 @@
-#!/usr/bin/env python
 """
 Dynamic confirmation shim for usage scripts.
 

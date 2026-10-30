@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Tests for accra_python/showcase_trace.py.
 
