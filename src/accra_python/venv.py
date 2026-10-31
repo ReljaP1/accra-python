@@ -1,3 +1,4 @@
+import subprocess
 from typing import override
 
 from accra_language import (
@@ -31,6 +32,7 @@ from .utils import (
 
 class Venv(PythonEnvironment, EnvironmentManager):
     _ENV_DIR = "venv"
+    _PIN_COMMAND = "venv/bin/python -m pip install --no-deps"
 
     def __init__(self, config: Config):
         spec = EnvironmentManagerSpec(
@@ -136,19 +138,37 @@ class Venv(PythonEnvironment, EnvironmentManager):
         if self.already_importable(dependency):
             return AccraResult()
 
-        install_result = utils.run(
-            [
-                "venv/bin/python",
-                "-m",
-                "pip",
-                "install",
-                "--retries",
-                utils.PIP_RETRIES,
-                dependency.name + dependency.version,
-            ],
-            self.spec.config,
-            utils.call_timeout(self),
+        message = (
+            "pip could not install dependency: " + dependency.name + dependency.version
         )
+        try:
+            install_result = utils.run(
+                [
+                    "venv/bin/python",
+                    "-m",
+                    "pip",
+                    "install",
+                    "--retries",
+                    utils.PIP_RETRIES,
+                    dependency.name + dependency.version,
+                ],
+                self.spec.config,
+                utils.call_timeout(self),
+            )
+        except (subprocess.SubprocessError, OSError) as exc:
+            # a timed-out or unstartable install is a failed dependency, not an
+            # exception out of the plugin
+            return AccraResult(
+                errors=[
+                    utils.exception_error(
+                        AccraFailedDependencyInstallError,
+                        message,
+                        exc,
+                        dependency=dependency,
+                        environment_manager=self,
+                    )
+                ]
+            )
 
         if install_result.returncode != 0:
             return AccraResult(

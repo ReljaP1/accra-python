@@ -443,3 +443,72 @@ def test_setup_py_name_is_the_setup_calls_name_keyword(tmp_path):
     assert package_docs.package_name(tmp_path) == "real-name"
     assert utils.setup_call_name("setup(filename='y')") is None
     assert utils.setup_call_name("setup(((") is None
+
+
+# -- an install that times out is a failed dependency, not an exception -------
+
+
+@pytest.mark.parametrize("manager_class", [Uv])
+def test_install_timeout_is_a_failed_dependency(
+    tmp_path: Path, monkeypatch, manager_class
+):
+    manager = manager_class(Config(cwd=tmp_path, timeout=5))
+    dependency = Dependency(name="scipy", version="==1.1.0")
+    monkeypatch.setattr(manager, "already_importable", lambda d: False)
+
+    def timed_out(command, *args, **kwargs):
+        raise subprocess.TimeoutExpired(command, 5, stderr=b"building wheel...")
+
+    monkeypatch.setattr(manager, "_run", timed_out)
+
+    result = manager._install_dependency(dependency)
+
+    assert len(result.errors) == 1
+    error = result.errors[0]
+    assert error.dependency == dependency
+    assert "scipy==1.1.0" in error.message
+    assert "timed out after 5" in error.message
+    assert error.command == [
+        "uv",
+        "pip",
+        "install",
+        "--python",
+        ".venv/bin/python",
+        "scipy==1.1.0",
+    ]
+    assert "building wheel" in (error.stderr or "")
+
+
+def test_pip_install_timeout_is_a_failed_dependency(tmp_path: Path, monkeypatch):
+    from accra_python import Venv
+
+    manager = Venv(Config(cwd=tmp_path, timeout=5))
+    dependency = Dependency(name="six", version="")
+    monkeypatch.setattr(manager, "already_importable", lambda d: False)
+
+    def timed_out(command, config, timeout=None, **kwargs):
+        raise subprocess.TimeoutExpired(command, 5)
+
+    monkeypatch.setattr(utils, "run", timed_out)
+
+    result = manager._install_dependency(dependency)
+
+    assert len(result.errors) == 1
+    assert result.errors[0].dependency == dependency
+    assert "timed out" in result.errors[0].message
+
+
+def test_install_that_cannot_start_is_a_failed_dependency(tmp_path: Path, monkeypatch):
+    manager = Uv(Config(cwd=tmp_path, timeout=5))
+    dependency = Dependency(name="six", version="")
+    monkeypatch.setattr(manager, "already_importable", lambda d: False)
+
+    def missing(command, *args, **kwargs):
+        raise FileNotFoundError(2, "No such file or directory", "uv")
+
+    monkeypatch.setattr(manager, "_run", missing)
+
+    result = manager._install_dependency(dependency)
+
+    assert len(result.errors) == 1
+    assert "FileNotFoundError" in result.errors[0].message

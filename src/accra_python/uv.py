@@ -1,3 +1,4 @@
+import subprocess
 from typing import override
 
 from accra_language import (
@@ -159,9 +160,24 @@ class Uv(PythonEnvironment, EnvironmentManager):
 
         spec: str = dependency.name + dependency.version
         # --python targets the project's venv even with an unrelated VIRTUAL_ENV
-        install_result = self._run(
-            ["uv", "pip", "install", "--python", _VENV_PYTHON, spec]
-        )
+        try:
+            install_result = self._run(
+                ["uv", "pip", "install", "--python", _VENV_PYTHON, spec]
+            )
+        except (subprocess.SubprocessError, OSError) as exc:
+            # a timed-out or unstartable install is a failed dependency, not an
+            # exception out of the plugin
+            return AccraResult(
+                errors=[
+                    utils.exception_error(
+                        AccraFailedDependencyInstallError,
+                        f"{self.spec.name} could not install dependency: {spec}",
+                        exc,
+                        dependency=dependency,
+                        environment_manager=self,
+                    )
+                ]
+            )
 
         if install_result.returncode != 0:
             return AccraResult(

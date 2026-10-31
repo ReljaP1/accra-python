@@ -6,6 +6,7 @@ import shlex
 import subprocess
 import sys
 import tomllib
+from collections.abc import Iterable
 from functools import cache
 from pathlib import Path
 
@@ -161,6 +162,20 @@ def failure_error(
         **failure_fields(completed),
         **fields,
     )
+
+
+def exception_error(
+    error_class: type[AccraError],
+    message: str,
+    exc: Exception,
+    **fields,
+) -> AccraError:
+    """An `error_class` for a command that could not finish (it timed out or
+    could not start): the command, the exit code and the end of its stderr are
+    kept, as `AccraError.from_exception` reads them. A plugin returns this and
+    never lets the exception out."""
+    base = AccraInstallError.from_exception(exc, message)
+    return error_class(**base.model_dump(), **fields)
 
 
 def pyenv_project_setup(
@@ -372,6 +387,13 @@ def docker_install(command: str, spec: str) -> DockerfileInstruction:
     """`RUN <command> <spec>` with the spec shell-quoted (specifier characters
     such as `>` and `;` are shell-active)."""
     return DockerfileInstruction(f"RUN {command} {shlex.quote(spec)}")
+
+
+def docker_install_all(command: str, specs: Iterable[str]) -> DockerfileInstruction:
+    """`RUN <command> <spec> <spec> ...`, each spec shell-quoted."""
+    return DockerfileInstruction(
+        f"RUN {command} " + " ".join(shlex.quote(spec) for spec in specs)
+    )
 
 
 # A directory name that goes into `PYTHONPATH` (a `:`-separated list) and into a

@@ -45,6 +45,12 @@ _DIRECT_SPEC_RE = re.compile(r"^(?:(?:git|hg|svn|bzr)\+|https?://|file:)")
 # installed also imports
 _IMPORT_CHECK_TIMEOUT = 60.0
 
+# Packaging tooling the image sets up itself (`uv`, the venv's `pip`), which a
+# pin of the analysed versions must not replace.
+_TOOLING_NAMES = frozenset(
+    {"pip", "setuptools", "wheel", "uv", "distribute", "pkg-resources"}
+)
+
 # directory names that are never the project's primary package
 _NOT_PRIMARY_NAMES = frozenset(
     {"tests", "test", "docs", "doc", "documentation", "examples", "example"}
@@ -83,6 +89,8 @@ class PythonEnvironment:
     directory relative to the project."""
 
     _ENV_DIR: str = ".venv"
+    # the image's installer, as `RUN <command> <spec>...`, for the transitive pins
+    _PIN_COMMAND: str = "uv pip install --no-deps"
 
     def _project(self) -> Path:
         return Path(self.spec.config.cwd or ".")
@@ -254,6 +262,68 @@ class PythonEnvironment:
             f"=={version}"
         )
 
+    def _location_distributions(self) -> set[str]:
+        """Canonical names of the installed distributions that came from a
+        location, not an index: a VCS or URL install, a local path or an editable
+        install (pip records them in `direct_url.json`)."""
+        names: set[str] = set()
+        for site in self._site_packages():
+            try:
+                entries = sorted(site.iterdir())
+            except OSError:
+                continue
+            for entry in entries:
+                if not entry.name.endswith(".dist-info"):
+                    continue
+                if (entry / "direct_url.json").is_file():
+                    stem = entry.name[: -len(".dist-info")].rpartition("-")[0]
+                    if stem:
+                        names.add(utils.canonical_name(stem))
+        return names
+
+    def transitive_pins(self) -> list[DockerfileInstruction]:
+        """One Dockerfile line that installs, pinned and without dependency
+        resolution, every installed package the direct dependency lines do not
+        pin: the transitive packages of the analysed environment, so that an image
+        built from the Dockerfile gets the same versions. Left out: the direct
+        dependencies (pinned by their own lines), the project itself, packaging
+        tooling, a distribution installed from a location (VCS, URL, path,
+        editable) and a version with a local label (`2.1.0+cu118`), which no index
+        serves. Sorted; no line when there is nothing to add or the list cannot
+        be read."""
+        try:
+            installed = self.installed_dependencies()
+        except (subprocess.SubprocessError, OSError):
+            return []
+        if isinstance(installed, AccraError):
+            return []
+        direct = {utils.dependency_base_name(d) for d in self._get_dependencies() or ()}
+        skipped = (
+            direct
+            | {utils.canonical_name(n) for n in self.project_names()}
+            | _TOOLING_NAMES
+            | self._location_distributions()
+        )
+        pins: dict[str, str] = {}
+        for dependency in installed:
+            name = utils.canonical_name(dependency.name)
+            version = dependency.version.removeprefix("==").strip()
+            if (
+                name in skipped
+                or not version
+                or "+" in version
+                or re.search(r"\s", version)
+            ):
+                continue
+            pins[name] = f"{dependency.name}=={version}"
+        if not pins:
+            return []
+        return [
+            utils.docker_install_all(
+                self._PIN_COMMAND, [pins[name] for name in sorted(pins)]
+            )
+        ]
+
     def import_check_error(self, dependency: Dependency) -> AccraError | None:
         """A failed-dependency error when an install that succeeded left a
         package that does not import. Not checked: a location spec, a
@@ -357,11 +427,15 @@ class PythonEnvironment:
         )
 
     def _primary_candidates(self) -> list[str]:
-        """The project's own names that can be its primary package: never its
-        tests, documentation or examples."""
+        """The project's own importable names, as on main: the modules and
+        packages that exist in it (at its root and in `src/`), never its tests,
+        documentation or examples. A distribution name is not one: it is not
+        what the code imports (`conformal-as-bayes-quad` ships `bcp`), so a
+        project with no module or package of its own has nothing to import and
+        runs from source."""
         return sorted(
             name
-            for name in self.project_names()
+            for name in utils._local_top_level_names(self._project())
             if utils.canonical_name(name) not in _NOT_PRIMARY_NAMES
         )
 
@@ -405,7 +479,10 @@ class PythonEnvironment:
                 self._source_mode_lines()
             )
 
-        if self._project_imports(candidates) or (has_install and not candidates):
+        # after the project's own install, which may have pulled in more packages
+        result.dockerfile.dependencies_installation.extend(self.transitive_pins())
+
+        if not candidates or self._project_imports(candidates):
             return result
         reason = (
             failure.message
