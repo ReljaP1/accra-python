@@ -39,6 +39,11 @@ def test_adhoc_package_resolution(tmp_path):
             Dependency(name="PyYAML", version="")
         )
         assert pyyaml
+        # the packages the direct lines do not pin follow in one `--no-deps` line
+        transitive = python3.env_manager.transitive_pins()
+        assert len(transitive) == 1
+        assert str(transitive[0]).startswith("RUN uv pip install --no-deps ")
+        assert not any(f" {name}==" in str(transitive[0]) for name in ("PyYAML",))
         assert result == AccraResult(
             dockerfile=Dockerfile(
                 pre_dependencies_installation=[
@@ -47,7 +52,10 @@ def test_adhoc_package_resolution(tmp_path):
                     f"RUN uv venv --seed --python {version}",
                     *docker_activate_environment(".venv"),
                 ],
-                dependencies_installation=[f"RUN uv pip install PyYAML=={pyyaml}"],
+                dependencies_installation=[
+                    f"RUN uv pip install PyYAML=={pyyaml}",
+                    *transitive,
+                ],
                 # no install step: the project runs from source
                 post_dependencies_installation=["ENV PYTHONPATH=/project"],
             )

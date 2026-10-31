@@ -40,6 +40,11 @@ def test_uv(tmp_path):
             for name in ("httpx", "pydantic", "rich")
         }
         assert all(pinned.values())
+        # the packages the direct lines do not pin follow in one `--no-deps` line
+        transitive = python3.env_manager.transitive_pins()
+        assert len(transitive) == 1
+        assert str(transitive[0]).startswith("RUN uv pip install --no-deps ")
+        assert not any(f" {name}==" in str(transitive[0]) for name in pinned)
         assert result == AccraResult(
             dockerfile=Dockerfile(
                 pre_dependencies_installation=[
@@ -53,6 +58,7 @@ def test_uv(tmp_path):
                     f"RUN uv pip install httpx=={pinned['httpx']}",
                     f"RUN uv pip install pydantic=={pinned['pydantic']}",
                     f"RUN uv pip install rich=={pinned['rich']}",
+                    *transitive,
                 ],
                 # then the project itself
                 post_dependencies_installation=[
